@@ -371,7 +371,25 @@ console.log('status bar live view (status sections + next up)')
   check('turn 2 plan shows its own progress', twoTurns.wire.turns['2'].plan.done, 2)
   check('live view still tracks the latest', twoTurns.wire.live.total, 3)
 
-  // A turn with no list of its own still gets a plan for context.
+  // REGRESSION: a turn that writes no list must NOT show another turn's plan.
+  // The card used to fall back to the conversation's live plan for such turns, so
+  // every plan-less card in a long session rendered the same current plan and the
+  // reader saw the "已完成" block frozen across a dozen turns.
+  const quiet = await fold([
+    ['turn/start', { turn: 1 }],
+    ['todo/write', { todos: [{ content: 'p1', status: 'pending' }] }],
+    ['turn/end', { turn: 1, reason: { kind: 'completed' } }],
+    ['turn/start', { turn: 2 }],
+    ['turn/end', { turn: 2, reason: { kind: 'completed' } }],
+    ['turn/start', { turn: 3 }],
+    ['turn/end', { turn: 3, reason: { kind: 'completed' } }],
+  ], cfg)
+  check('turn 1 has its own plan', quiet.wire.turns['1'].plan.total, 1)
+  check('turn 2 shows no inherited plan', quiet.wire.turns['2'].plan, null)
+  check('turn 3 shows no inherited plan', quiet.wire.turns['3'].plan, null)
+  check('live still tracks the session plan', quiet.wire.live.total, 1)
+
+  // A turn with no list of its own still gets no plan (unchanged behaviour).
   const noList = await fold([
     ['turn/start', { turn: 1 }],
     ['todo/write', { todos: flat }],

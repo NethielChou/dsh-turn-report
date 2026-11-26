@@ -593,11 +593,16 @@ window.__ModuleLoader__.load({
 
       // The plan HUD: progress strip and the plan by section, each section foldable.
       // It reads THIS turn's frozen snapshot, not the conversation's current plan —
-      // otherwise every historical card would show today's state instead of its own.
-      // When the turn wrote no list of its own, fall back to the live plan so the
-      // card still says what the project looked like around it.
-      const plan = entry.plan ?? (todo === null ? view.live : null)
-      if (opts.showStatusBar !== false && plan !== null && plan !== undefined && plan.total > 0) {
+      // This turn's own frozen plan, and nothing else.
+      //
+      // It used to fall back to `view.live` when a turn wrote no list, on the theory
+      // that showing "the plan around this turn" beat showing nothing. In practice
+      // most turns write no list, so a dozen historical cards all rendered the same
+      // current plan — the reader scrolls back, sees identical blocks on every turn,
+      // and concludes the feature is broken. Repetition of a stale value is worse
+      // than absence: a turn with no list shows no HUD.
+      const plan = entry.plan ?? null
+      if (opts.showStatusBar !== false && plan !== null && plan.total > 0) {
         blocks.push(planHud(plan, label, overrides, toggleSection))
       }
 

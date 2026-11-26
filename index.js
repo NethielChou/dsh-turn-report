@@ -357,9 +357,13 @@ function freezeTurn(turn, endKind, todos, prevTodos, maxRows, cwd) {
     llm: (turn.calls ?? 0) > 0
       ? { calls: turn.calls, models: turn.models ?? [], usage: turn.usage ?? emptyUsage() }
       : null,
-    // The plan as it stood when this turn ended. Frozen per turn on purpose: a
-    // card must describe its own turn, so fifteen historical cards cannot all
-    // show today's plan.
+    // The plan as this turn left it — only when the turn actually wrote a list.
+    //
+    // Inheriting the previous turn's list here was tried and reverted: because only
+    // ~26% of turns call `todo_write`, a dozen consecutive cards inherited the same
+    // unchanged plan and rendered identical blocks. To a reader scrolling back that
+    // looks like the feature is frozen or broken. A turn that wrote nothing has no
+    // plan state of its own, so it shows none.
     plan: Array.isArray(todos) && todos.length > 0 ? planSnapshot(todos, maxRows) : null,
     todo: null,
   }
