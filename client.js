@@ -47,6 +47,7 @@ window.__ModuleLoader__.load({
         sbPlan: '当前计划',
         sbStale: '本轮未更新',
         sbStaleHint: '本轮没有写任务清单，上面是仍在生效的最近一份计划',
+        sbSeenAbove: '见上方',
         sbAllDone: '全部完成',
         sbNext: '下一项',
         sbExpand: '展开状态栏',
@@ -79,6 +80,7 @@ window.__ModuleLoader__.load({
         sbPlan: 'Current plan',
         sbStale: 'not updated this turn',
         sbStaleHint: 'This turn wrote no task list; the newest plan still in force is shown.',
+        sbSeenAbove: 'listed above',
         sbAllDone: 'All done',
         sbNext: 'Next',
         sbExpand: 'Expand status bar',
@@ -319,6 +321,26 @@ window.__ModuleLoader__.load({
         cursor: 'default',
       },
       sbGroupLabelEmpty: { fontWeight: 400, color: 'var(--dsw-alias-label-tertiary)' },
+      // A section whose rows already appear in the finished block above.
+      sbGroupSuppressed: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: 7,
+        width: '100%',
+        border: '1px solid var(--dsw-alias-border-l2)',
+        background: 'transparent',
+        padding: '4px 8px',
+        borderRadius: 6,
+        marginTop: 3,
+        boxSizing: 'border-box',
+        opacity: 0.7,
+        cursor: 'default',
+      },
+      sbSeenAbove: {
+        marginLeft: 'auto',
+        fontSize: 10,
+        color: 'var(--dsw-alias-label-tertiary)',
+      },
       sbStale: {
         marginLeft: 6,
         padding: '0 5px',
@@ -595,8 +617,9 @@ window.__ModuleLoader__.load({
       // The built-in input-dock panel already renders the live list and its
       // counts, so repeating it here would be pure duplication; "newly finished"
       // is the one todo fact that panel does not have.
+      let finishedBox = null
       if (showFinished) {
-        blocks.push(h('div', { key: 'finished', style: style.pendingBox },
+        finishedBox = h('div', { key: 'finished', style: style.pendingBox },
           h('div', { key: 'h', style: style.sectionTitle },
             h('span', null, '📝 ' + label('finished')),
             h('span', { style: style.turnBadge }, fmt(label('finishedCount'), {
@@ -607,16 +630,30 @@ window.__ModuleLoader__.load({
             h('span', { key: 'c', style: style.pendingText }, row.c))),
           (todo.finishedMore ?? 0) > 0
             ? h('div', { key: 'm', style: style.more }, '… ' + fmt(label('more'), { n: todo.finishedMore }))
-            : null))
+            : null)
+        blocks.push(finishedBox)
       }
 
       // The plan HUD: progress strip and the plan by section, each section foldable.
       // `entry.plan` is this turn's own list when it wrote one; otherwise the newest
       // list still in force, flagged `stale` so the HUD can say "this turn did not
       // update the plan" instead of silently repeating identical blocks.
+      //
+      // When the finished block already lists exactly the rows a finished section
+      // would show, that section is redundant — the same five lines appeared twice
+      // on every all-done turn. Such a section is passed to the HUD as
+      // `suppressed`, which renders its heading and count but not its rows.
       const plan = entry.plan ?? null
       if (opts.showStatusBar !== false && plan !== null && plan.total > 0) {
-        blocks.push(planHud(plan, label, overrides, toggleSection))
+        const finishedKeys = new Set(finished.map(row => row.c))
+        const sections = plan.groups.map((group) => {
+          const covered = finishedBox !== null
+            && group.total > 0
+            && group.children.length === group.total
+            && group.children.every(row => finishedKeys.has(row.c))
+          return covered ? { ...group, suppressed: true } : group
+        })
+        blocks.push(planHud({ ...plan, groups: sections }, label, overrides, toggleSection))
       }
 
       if (showsWholePlan) {
@@ -723,6 +760,24 @@ window.__ModuleLoader__.load({
         const isOpen = group.empty === true
           ? false
           : overrides.has(index) ? overrides.get(index) : defaultOpen
+
+        // A section whose rows are already listed verbatim in the "本轮完成" block above
+        // shows its heading and count only — no chevron, since there is nothing new to
+        // reveal. This is what stops an all-done turn from printing the same five
+        // lines twice.
+        if (group.suppressed === true) {
+          return h('div', {
+            key: 'g' + index,
+            style: style.sbGroupSuppressed,
+            'data-group': group.k,
+            'data-suppressed': '1',
+            title: label('sbSeenAbove'),
+          },
+          h('span', { key: 'i' }, (STATUS[group.s] ?? STATUS.left).icon),
+          h('span', { key: 't', style: style.sbGroupLabel }, group.t),
+          h('span', { key: 'n', style: style.sbGroupCount }, group.total),
+          h('span', { key: 'h', style: style.sbSeenAbove }, label('sbSeenAbove')))
+        }
 
         // An empty slot stays visible but goes flat: no chevron, no button, no
         // click target. It reports "0 here", not "you can open this".
