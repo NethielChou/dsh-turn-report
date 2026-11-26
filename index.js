@@ -335,6 +335,28 @@ function livePlan(state, maxRows) {
 }
 
 /**
+ * The plan a closed turn should report.
+ *
+ * The turn's own list wins. When the turn wrote none, the newest list still in
+ * force is carried forward with `stale: true`, so the card can show the plan and
+ * say plainly that this turn did not update it. Showing nothing loses the context
+ * entirely; showing an unlabelled repeat looks like a frozen UI.
+ * @param {object[] | null} todos - the list this turn wrote, if any.
+ * @param {object[] | null} prevTodos - the newest earlier list, if any.
+ * @param {number} maxRows - section budget from config.
+ * @returns {object | null} the plan payload, or null when no list is known yet.
+ */
+function planFor(todos, prevTodos, maxRows) {
+  if (Array.isArray(todos) && todos.length > 0) {
+    return { ...planSnapshot(todos, maxRows), stale: false }
+  }
+  if (Array.isArray(prevTodos) && prevTodos.length > 0) {
+    return { ...planSnapshot(prevTodos, maxRows), stale: true }
+  }
+  return null
+}
+
+/**
  * Freeze the live turn into the compact entry the client renders.
  * @param {object} turn - the live accumulator for the closing turn.
  * @param {string} endKind - the `turn/end` reason kind.
@@ -357,14 +379,16 @@ function freezeTurn(turn, endKind, todos, prevTodos, maxRows, cwd) {
     llm: (turn.calls ?? 0) > 0
       ? { calls: turn.calls, models: turn.models ?? [], usage: turn.usage ?? emptyUsage() }
       : null,
-    // The plan as this turn left it — only when the turn actually wrote a list.
+    // The plan state this card reports: the turn's own list when it wrote one,
+// otherwise the most recent list that was still in force, marked `stale`.
     //
-    // Inheriting the previous turn's list here was tried and reverted: because only
-    // ~26% of turns call `todo_write`, a dozen consecutive cards inherited the same
-    // unchanged plan and rendered identical blocks. To a reader scrolling back that
-    // looks like the feature is frozen or broken. A turn that wrote nothing has no
-    // plan state of its own, so it shows none.
-    plan: Array.isArray(todos) && todos.length > 0 ? planSnapshot(todos, maxRows) : null,
+    // Both extremes failed in practice. Rendering nothing for plan-less turns left
+    // most cards with no HUD at all ("改完后怎么什么都没了"). Rendering the *live*
+    // plan let a dozen cards repeat today's state with no explanation, which reads
+    // as frozen. Carrying the newest known list forward and labelling it is the
+    // honest middle: the reader sees the plan that was actually in force, and the
+    // badge says the turn itself did not update it.
+    plan: planFor(todos, prevTodos, maxRows),
     todo: null,
   }
   if (Array.isArray(todos) && todos.length > 0) {

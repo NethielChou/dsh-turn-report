@@ -371,10 +371,11 @@ console.log('status bar live view (status sections + next up)')
   check('turn 2 plan shows its own progress', twoTurns.wire.turns['2'].plan.done, 2)
   check('live view still tracks the latest', twoTurns.wire.live.total, 3)
 
-  // REGRESSION: a turn that writes no list must NOT show another turn's plan.
-  // The card used to fall back to the conversation's live plan for such turns, so
-  // every plan-less card in a long session rendered the same current plan and the
-  // reader saw the "已完成" block frozen across a dozen turns.
+  // A turn that writes no list carries the newest plan forward, flagged stale.
+  // Two earlier designs failed on this: rendering nothing left most cards with no
+  // HUD ("改完后怎么什么都没了"), while rendering the live plan repeated today's
+  // state with no explanation. The carried-forward flag is what keeps a repeat from
+  // reading as a frozen UI.
   const quiet = await fold([
     ['turn/start', { turn: 1 }],
     ['todo/write', { todos: [{ content: 'p1', status: 'pending' }] }],
@@ -384,12 +385,14 @@ console.log('status bar live view (status sections + next up)')
     ['turn/start', { turn: 3 }],
     ['turn/end', { turn: 3, reason: { kind: 'completed' } }],
   ], cfg)
-  check('turn 1 has its own plan', quiet.wire.turns['1'].plan.total, 1)
-  check('turn 2 shows no inherited plan', quiet.wire.turns['2'].plan, null)
-  check('turn 3 shows no inherited plan', quiet.wire.turns['3'].plan, null)
+  check('turn 1 plan is its own, not stale', quiet.wire.turns['1'].plan.stale, false)
+  check('turn 1 reports its own list', quiet.wire.turns['1'].plan.total, 1)
+  check('turn 2 carries the plan forward', quiet.wire.turns['2'].plan.total, 1)
+  check('turn 2 marks it stale', quiet.wire.turns['2'].plan.stale, true)
+  check('turn 3 still carries it', quiet.wire.turns['3'].plan.stale, true)
   check('live still tracks the session plan', quiet.wire.live.total, 1)
 
-  // A turn with no list of its own still gets no plan (unchanged behaviour).
+  // A turn with no list still shows the plan in force, also marked stale.
   const noList = await fold([
     ['turn/start', { turn: 1 }],
     ['todo/write', { todos: flat }],
@@ -397,8 +400,16 @@ console.log('status bar live view (status sections + next up)')
     ['turn/start', { turn: 2 }],
     ['turn/end', { turn: 2, reason: { kind: 'completed' } }],
   ], cfg)
-  check('turn without a list has no own plan', noList.wire.turns['2'].plan, null)
+  check('turn without a list shows the carried plan', noList.wire.turns['2'].plan.total, 4)
+  check('and flags it stale', noList.wire.turns['2'].plan.stale, true)
   check('live plan still available for context', noList.wire.live.total, 4)
+
+  // With no list ever written, there is nothing to carry and nothing to show.
+  const never = await fold([
+    ['turn/start', { turn: 1 }],
+    ['turn/end', { turn: 1, reason: { kind: 'completed' } }],
+  ], cfg)
+  check('no plan ever written → no plan block', never.wire.turns['1'].plan, null)
 
   // REGRESSION: the last real plan must survive many plan-less turns. Before the
   // fix `turn/start` set prevTodos = state.todos (null on a plan-less turn), so two

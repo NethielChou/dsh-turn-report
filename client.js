@@ -40,6 +40,8 @@ window.__ModuleLoader__.load({
         llmDetailOutput: '输出：{n}',
         llmDetailTotal: '合计：{n}',
         sbPlan: '当前计划',
+        sbStale: '本轮未更新',
+        sbStaleHint: '本轮没有写任务清单，上面是仍在生效的最近一份计划',
         sbAllDone: '全部完成',
         sbNext: '下一项',
         sbExpand: '展开状态栏',
@@ -70,6 +72,8 @@ window.__ModuleLoader__.load({
         llmDetailOutput: 'Output: {n}',
         llmDetailTotal: 'Total: {n}',
         sbPlan: 'Current plan',
+        sbStale: 'not updated this turn',
+        sbStaleHint: 'This turn wrote no task list; the newest plan still in force is shown.',
         sbAllDone: 'All done',
         sbNext: 'Next',
         sbExpand: 'Expand status bar',
@@ -310,6 +314,16 @@ window.__ModuleLoader__.load({
         cursor: 'default',
       },
       sbGroupLabelEmpty: { fontWeight: 400, color: 'var(--dsw-alias-label-tertiary)' },
+      sbStale: {
+        marginLeft: 6,
+        padding: '0 5px',
+        borderRadius: 6,
+        border: '1px solid var(--dsw-alias-border-l2)',
+        fontSize: 10,
+        fontWeight: 400,
+        color: 'var(--dsw-alias-label-tertiary)',
+        letterSpacing: '0.02em',
+      },
       sbGroupCount: {
         marginLeft: 'auto',
         fontSize: 11,
@@ -592,15 +606,9 @@ window.__ModuleLoader__.load({
       }
 
       // The plan HUD: progress strip and the plan by section, each section foldable.
-      // It reads THIS turn's frozen snapshot, not the conversation's current plan —
-      // This turn's own frozen plan, and nothing else.
-      //
-      // It used to fall back to `view.live` when a turn wrote no list, on the theory
-      // that showing "the plan around this turn" beat showing nothing. In practice
-      // most turns write no list, so a dozen historical cards all rendered the same
-      // current plan — the reader scrolls back, sees identical blocks on every turn,
-      // and concludes the feature is broken. Repetition of a stale value is worse
-      // than absence: a turn with no list shows no HUD.
+      // `entry.plan` is this turn's own list when it wrote one; otherwise the newest
+      // list still in force, flagged `stale` so the HUD can say "this turn did not
+      // update the plan" instead of silently repeating identical blocks.
       const plan = entry.plan ?? null
       if (opts.showStatusBar !== false && plan !== null && plan.total > 0) {
         blocks.push(planHud(plan, label, overrides, toggleSection))
@@ -748,11 +756,19 @@ window.__ModuleLoader__.load({
       })
 
       parts.push(h('div', { key: 'groups', style: style.sbSection },
-        h('div', { key: 'h', style: style.sbSectionTitle }, '📋 ' + label('sbPlan')),
+        h('div', { key: 'h', style: style.sbSectionTitle },
+          '📋 ' + label('sbPlan'),
+          plan.stale === true
+            ? h('span', { key: 's', style: style.sbStale, title: label('sbStaleHint') }, label('sbStale'))
+            : null),
         sections))
       if (plan.more > 0) parts.push(h('div', { key: 'more', style: style.more }, '… ' + fmt(label('more'), { n: plan.more })))
 
-      return h('div', { key: 'plan', style: style.hud }, parts)
+      return h('div', {
+        key: 'plan',
+        style: plan.stale === true ? { ...style.hud, opacity: 0.82 } : style.hud,
+        'data-stale': plan.stale === true ? '1' : undefined,
+      }, parts)
     }
 
     /**
