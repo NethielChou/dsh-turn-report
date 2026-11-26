@@ -437,6 +437,59 @@ console.log('status bar live view (status sections + next up)')
   check('showStatusBar false reaches the wire', hidden.wire.opts.showStatusBar, false)
 }
 
+console.log('stage grouping (【阶段】 prefixes)')
+{
+  const cfg = { maxRows: 6, showWithoutTasks: true, showTree: true, showFiles: true, showFinished: true, showLlm: true, showStatusBar: true, todoView: 'auto' }
+  // A staged plan: sections become the stages, each with its own state.
+  const staged = await fold([
+    ['turn/start', { turn: 1 }],
+    ['todo/write', { todos: [
+      { content: '【阶段一】确认技术路径', status: 'completed' },
+      { content: '【阶段一】读参考文档', status: 'completed' },
+      { content: '【阶段二】搭插件骨架', status: 'in_progress' },
+      { content: '【阶段二】实现投影', status: 'pending' },
+      { content: '【阶段三】市场发布', status: 'pending' },
+    ] }],
+  ], cfg)
+  const g = staged.wire.live.groups
+  check('sections are the stages, in first-seen order', g.map(x => x.t), ['阶段一', '阶段二', '阶段三'])
+  check('a fully-done stage reports done', g[0].s, 'done')
+  check('a running stage reports doing', g[1].s, 'doing')
+  check('an untouched stage reports left', g[2].s, 'left')
+  check('stage counts its own items', g.map(x => x.total), [2, 2, 1])
+  check('stage prefixes are stripped from rows', g[0].children.map(c => c.c), ['确认技术路径', '读参考文档'])
+  check('finished stage starts folded', g[0].startOpen, false)
+  check('running stage starts open', g[1].startOpen, true)
+
+  // Alternate bracket styles are accepted.
+  const alt = await fold([
+    ['turn/start', { turn: 1 }],
+    ['todo/write', { todos: [
+      { content: '〔P1〕做 A', status: 'completed' },
+      { content: '[P2] 做 B', status: 'pending' },
+    ] }],
+  ], cfg)
+  check('〔〕 and [] both mark stages', alt.wire.live.groups.map(x => x.t), ['P1', 'P2'])
+
+  // Lines without a marker join an "其他" section rather than being dropped.
+  const mixed = await fold([
+    ['turn/start', { turn: 1 }],
+    ['todo/write', { todos: [
+      { content: '【阶段一】有标记', status: 'completed' },
+      { content: '没标记的任务', status: 'pending' },
+    ] }],
+  ], cfg)
+  check('unmarked lines fall into 其他', mixed.wire.live.groups.map(x => x.t), ['阶段一', '其他'])
+  check('其他 keeps the row', mixed.wire.live.groups[1].children.map(c => c.c), ['没标记的任务'])
+
+  // With no markers at all, the status buckets are used (unchanged behaviour).
+  const flatOnly = await fold([
+    ['turn/start', { turn: 1 }],
+    ['todo/write', { todos: [{ content: '任务甲', status: 'completed' }] }],
+  ], cfg)
+  check('flat list still uses status slots', flatOnly.wire.live.groups.map(x => x.k), ['done', 'doing', 'left'])
+}
+
 console.log('no-op events keep the state reference')
 {
   const { ctx, captured } = fakeContext()

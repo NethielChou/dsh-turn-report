@@ -287,7 +287,7 @@ function finishedDuring(todos, prevTodos, maxRows) {
     if (item?.status !== 'completed') continue
     const content = String(item?.content ?? '')
     if (alreadyDone.has(matchKey(content))) continue
-    if (finished.length < maxRows) finished.push({ c: labelOf(content), d: depthOf(content) })
+    if (finished.length < maxRows) finished.push({ c: rowTextOf(content), d: depthOf(content) })
     else extra += 1
   }
   return { finished, finishedMore: extra }
@@ -312,7 +312,7 @@ function planSnapshot(todos, maxRows) {
     else if (status === 'doing') doing += 1
     else left += 1
     if (status !== 'done' && nextUp.length < LIVE_NEXT_UP) {
-      nextUp.push({ c: labelOf(String(item?.content ?? '')), s: status })
+      nextUp.push({ c: rowTextOf(String(item?.content ?? '')), s: status })
     }
   }
   const { groups, more } = groupTodos(todos, MAX_GROUP_ITEMS)
@@ -402,7 +402,7 @@ function freezeTurn(turn, endKind, todos, prevTodos, maxRows, cwd) {
       else if (status === 'doing') doing += 1
       else left += 1
       const content = String(item?.content ?? '')
-      if (rows.length < maxRows) rows.push({ s: status, c: labelOf(content), d: depthOf(content) })
+      if (rows.length < maxRows) rows.push({ s: status, c: rowTextOf(content), d: depthOf(content) })
     }
     const delta = finishedDuring(todos, prevTodos, HARD_MAX_ROWS)
     entry.todo = {
@@ -432,20 +432,126 @@ function statusOf(item) {
 }
 
 /**
+ * The task text of a todo line, with list markers and any 【stage】 prefix removed.
+ *
+ * The stage prefix already appears as its own section heading, so repeating it on
+ * every row wastes the scarce width a card has.
+ * @param {string} content - the raw todo line.
+ * @returns {string} the display text.
+ */
+function rowTextOf(content) {
+  const stripped = labelOf(content).replace(/^[【\[〔][^】\]〕]*[】\]〕]\s*/, '').trim()
+  return stripped === '' ? labelOf(content) : stripped
+}
+
+/**
+ * Stage label carried by a todo line, if the author wrote one.
+ *
+ * `todo_write` has no stage field, so the stage has to travel inside the item text.
+ * Accepted forms, matched anywhere at the start of the line (after list markers):
+ *   【阶段一】做某事      〔P1〕做某事      [阶段2] 做某事
+ * The captured text is returned trimmed, without the brackets.
+ * @param {string} content - the raw todo line.
+ * @returns {string | null} the stage label, or null when the line has none.
+ */
+function stageOf(content) {
+  const bare = String(content).replace(/^[\s\u3000]+/, '').replace(/^(?:[-*•·]|\d+[.)])\s*/, '')
+  const m = bare.match(/^[【\[〔]\s*([^】\]〕]{1,24}?)\s*[】\]〕]\s*(.*)$/)
+  if (m === null) return null
+  return m[1].trim() === '' ? null : m[1].trim()
+}
+
+/**
+ * Whether a stage label reads as its own stage grouping key.
+ *
+ * Anything the author wrapped in brackets counts, so no vocabulary is imposed on
+ * the writer: 【阶段一】, 【P1】, 【调研】 all become sections.
+ * @param {string} content - the raw todo line.
+ * @returns {boolean} true when the line opens a stage.
+ */
+function hasStage(content) {
+  return stageOf(content) !== null
+}
+
+/**
  * Group a todo list into the status bar's collapsible sections.
  *
- * Grouping is by STATUS first (done / doing / left), because real `todo_write`
- * lists are almost always flat — measured on this project's own session: 0 of 5
- * items carried any indentation. Grouping by indentation alone produced one
- * section per item, none collapsible, so the fold arrows never appeared.
+ * Two grouping axes, in priority order:
  *
- * When the model *did* indent, the depth-0 lines become the top-level rows inside
- * each status section, so structure is not lost — it is just secondary to status.
+ * 1. **Stages** — when any line carries a 【label】 prefix, sections are the stages
+ *    in the order they first appear, and each section's status is derived from its
+ *    own items (all done → done, any in progress → doing, else left). This is what
+ *    "已完成 / 进行中 / 待办" means to a reader: which *phases of the work* are in
+ *    which state, not which individual tasks are.
+ * 2. **Status** — with no stage markers the list is bucketed by task status. Real
+ *    `todo_write` payloads are flat (measured: 0 of 5 items carried indentation),
+ *    so this is the common path and gives three stable slots.
+ *
  * @param {object[]} todos - the whole list.
  * @param {number} maxItems - how many rows to keep per section.
  * @returns {{ groups: object[], more: number }} the sections and the omitted count.
  */
 function groupTodos(todos, maxItems) {
+  const anyStage = todos.some(item => hasStage(item?.content ?? ''))
+  if (anyStage) return groupByStage(todos, maxItems)
+  return groupByStatus(todos, maxItems)
+}
+
+/**
+ * Group by the 【stage】 prefixes the author wrote.
+ * @param {object[]} todos - the whole list.
+ * @param {number} maxItems - how many rows to keep per section.
+ * @returns {{ groups: object[], more: number }} the sections and the omitted count.
+ */
+function groupByStage(todos, maxItems) {
+  const sections = new Map()
+  let omitted = 0
+  for (const item of todos) {
+    const content = String(item?.content ?? '')
+    const stage = stageOf(content) ?? '其他'
+    const status = statusOf(item)
+    let section = sections.get(stage)
+    if (section === undefined) {
+      section = { label: stage, rows: [], done: 0, doing: 0, left: 0 }
+      sections.set(stage, section)
+    }
+    if (status === 'done') section.done += 1
+    else if (status === 'doing') section.doing += 1
+    else section.left += 1
+    // The stage label itself is not a task row; store the remainder of the line.
+    if (section.rows.length < maxItems) {
+      section.rows.push({ c: rowTextOf(content), s: status, d: depthOf(content) })
+    } else {
+      omitted += 1
+    }
+  }
+  const groups = [...sections.values()].map((section, index) => {
+    const total = section.done + section.doing + section.left
+    // A stage is in whatever state its own items are: fully done beats running.
+    const state = total > 0 && section.done === total ? 'done' : section.doing > 0 ? 'doing' : 'left'
+    return {
+      k: 'stage-' + index,
+      t: section.label,
+      s: state,
+      total,
+      done: section.done,
+      empty: total === 0,
+      children: section.rows,
+      collapsible: section.rows.length > 1,
+      startOpen: state !== 'done',
+      stage: true,
+    }
+  })
+  return { groups, more: omitted }
+}
+
+/**
+ * Group by task status — the fallback when no stage markers are present.
+ * @param {object[]} todos - the whole list.
+ * @param {number} maxItems - how many rows to keep per section.
+ * @returns {{ groups: object[], more: number }} the sections and the omitted count.
+ */
+function groupByStatus(todos, maxItems) {
   const buckets = {
     done: { key: 'done', t: '已完成', s: 'done', rows: [], collapsedByDefault: true },
     doing: { key: 'doing', t: '进行中', s: 'doing', rows: [], collapsedByDefault: false },
