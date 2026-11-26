@@ -23,7 +23,7 @@
 #     config: { maxRows: 10, todoView: tree }
 - insert:
     - id: turn-report
-      name: 'dsh-turn-report'
+      name: '@nethiel/dsh-turn-report'
       config:
         maxRows: 6
         showWithoutTasks: true

@@ -1,5 +1,5 @@
 {
-  "name": "dsh-turn-report",
+  "name": "@nethiel/dsh-turn-report",
   "version": "0.1.0",
   "type": "module",
   "description": "Turn-end project report for DeepSeek Harness: a card under every closing answer with metrics, model/token spend, files touched, what this turn finished, and a collapsible plan HUD grouped by done / in progress / left. Derived from the session log; no model calls, no token cost.",

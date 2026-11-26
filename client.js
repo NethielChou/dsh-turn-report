@@ -15,7 +15,7 @@ window.__ModuleLoader__.load({
   // the npm name here made the host report `could not load "dsh-turn-report":
   // loaded without registering "dsh-turn-report"` and then a duplicate-factory
   // error, so the whole client half silently failed to mount.
-  id: 'dsh-turn-report',
+  id: '@nethiel/dsh-turn-report',
   factory: (require) => {
     const React = require('react')
     const h = React.createElement
@@ -787,7 +787,7 @@ window.__ModuleLoader__.load({
       }
       ctx.slots.inject('conversation.chat.turnTail', () => ctx.slots.register({
         name: 'conversation.chat.turnTail',
-        id: 'dsh-turn-report',
+        id: '@nethiel/dsh-turn-report',
         order: -10,
         locale: NS,
       }, TurnReport))
