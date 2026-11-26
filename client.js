@@ -10,7 +10,12 @@
  */
 
 window.__ModuleLoader__.load({
-  id: '@nethiel/dsh-turn-report',
+  // This id must equal the name the host registers the bundle under, which is the
+  // profile's dependency key — `dsh-turn-report`, not the scoped npm name. Using
+  // the npm name here made the host report `could not load "dsh-turn-report":
+  // loaded without registering "dsh-turn-report"` and then a duplicate-factory
+  // error, so the whole client half silently failed to mount.
+  id: 'dsh-turn-report',
   factory: (require) => {
     const React = require('react')
     const h = React.createElement
