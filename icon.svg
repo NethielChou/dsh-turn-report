@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 36 36" role="img" aria-label="Turn report">
+  <g fill="none" stroke="#3f6fd8" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 9.5h9.5"/>
+    <path d="M8 18h9.5"/>
+    <path d="M8 26.5h9.5"/>
+    <path d="M21.5 9.5h6.5"/>
+    <path d="M21.5 18h6.5"/>
+  </g>
+  <g fill="#3f6fd8">
+    <circle cx="24.5" cy="26.5" r="2.6"/>
+  </g>
+  <g fill="none" stroke="#3f6fd8" stroke-width="2.1" stroke-linecap="round">
+    <path d="M10.5 15.5v-2.2h4.6v-2.2"/>
+    <path d="M10.5 24v-2.2h4.6v-2.2"/>
+  </g>
+</svg>

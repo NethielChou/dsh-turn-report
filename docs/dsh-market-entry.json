@@ -1,0 +1,12 @@
+{
+  "id": "NethielChou/dsh-turn-report",
+  "name": "轮末项目汇报",
+  "nameEn": "Turn Report",
+  "author": "NethielChou",
+  "repo": "https://github.com/NethielChou/dsh-turn-report",
+  "npm": "@nethiel/dsh-turn-report",
+  "description": "每轮回复结束后自动出现一张汇报卡：指标表格、模型与 token 用量、改动文件、本轮完成的待办，以及可按「已完成 / 进行中 / 待办」折叠的任务状态条。全部由宿主从会话日志推导，不调用模型、不消耗 token。",
+  "descriptionEn": "A report card under every completed turn: metrics, model and token spend, files touched, what this turn finished, and a collapsible task status bar grouped by done / in progress / left. Derived from the session log on the host; no model calls, no token cost.",
+  "category": "tools",
+  "subcategory": "dev"
+}

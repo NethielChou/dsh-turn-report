@@ -1,0 +1,72 @@
+{
+  "name": "@nethiel/dsh-turn-report",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Turn-end project report for DeepSeek Harness: a card under every closing answer with metrics, model/token spend, files touched, what this turn finished, and a collapsible plan HUD grouped by done / in progress / left. Derived from the session log; no model calls, no token cost.",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "docs",
+    "test",
+    "icon.svg",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "test": "node --test test/fold.test.mjs"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "turn-report",
+    "todo",
+    "project-tree",
+    "progress",
+    "status-bar"
+  ],
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-chat"
+      ]
+    },
+    "engines": {
+      "dsh": ">=0.2.1-rc.2"
+    },
+    "compatibility": {
+      "dshReleases": {
+        "0.2.2-rc.5": "compatible"
+      }
+    }
+  },
+  "icon": "icon.svg"
+}

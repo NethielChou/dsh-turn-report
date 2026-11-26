@@ -1,0 +1,35 @@
+# dsh-turn-report — 每轮结束的项目汇报卡。
+#
+# config 全部可选：
+#   maxRows            表格和树最多列出多少条任务（默认 6）
+#   showWithoutTasks   本轮没有任务清单时，也把工具调用/改动文件汇报出来（默认 true）
+#   showTree           允许画 ASCII 项目树（默认 true）
+#   showFiles          汇报本轮改动的文件（默认 true）
+#   showFinished       允许出「本轮完成」清单（默认 true）
+#   showLlm            允许出「模型 · 调用次数 · token」摘要行（默认 true）
+#   showStatusBar      允许出计划 HUD（进度条 + 可折叠分组，默认 true）
+#   todoView           待办区出什么（默认 auto）
+#                        auto = 只出「本轮完成」——与输入框上方的原生待办面板零重复
+#                        tree = 只出整棵任务树
+#                        both = 两个都出（完成项会重复）
+#
+# 注意：本插件刻意不重复「当前完整清单」。
+# DSH 原生待办面板（输入框上方 conversation.input.dock，id 'todo'）已经展示它。
+# 卡片里的计划 HUD 只显示「这一轮结束时的计划快照」，逐轮冻结，
+# 所以十几张历史卡片各显示各的状态，不会被最新状态覆盖。
+#
+# 覆盖默认值时在 profile 的 cordis.patch.yml 里重写同一行（整份 config 替换，不是深合并）：
+#   - id: turn-report
+#     config: { maxRows: 10, todoView: tree }
+- insert:
+    - id: turn-report
+      name: '@nethiel/dsh-turn-report'
+      config:
+        maxRows: 6
+        showWithoutTasks: true
+        showTree: true
+        showFiles: true
+        showFinished: true
+        showLlm: true
+        showStatusBar: true
+        todoView: auto

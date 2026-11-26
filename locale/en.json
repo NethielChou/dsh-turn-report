@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Turn report",
+    "description": "Two surfaces. First, a resident task status bar under the composer: a game-HUD progress strip showing what last turn finished, the next few items, and per-section plan progress, with each task section collapsible and the whole bar foldable to one line; the plan survives turn boundaries and no model is called. Second, a report card under each completed turn: metrics table (tool calls / failures / files / end state), an execution line (model, call count, tokens), files touched, and what this turn newly finished. It deliberately does not repeat the full list the built-in todo panel above the composer already shows — the bar gives a focused slice, the card gives this turn's delta. Everything is derived from the session log on the host: zero tokens.",
+    "detail": "docs/DETAIL.md"
+  }
+}
