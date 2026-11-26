@@ -47,8 +47,14 @@ const KEY = 'turnReport'
  * `empty` flag, instead of only the slots that happened to have rows. Without the
  * bump, a cached v7 checkpoint would keep serving the old shape and the HUD would
  * silently render the previous layout.
+ *
+ * v9: plan groups may now be STAGES (when items carry 【label】 prefixes) rather
+ * than status buckets, and every row's `c` has the stage prefix stripped. Same
+ * hazard as v8 and it was paid for again: the code changed, the version did not,
+ * so a cached v8 checkpoint kept replaying the status-grouped shape and the UI
+ * looked untouched across several restarts and green test runs.
  */
-const STATE_VERSION = 8
+const STATE_VERSION = 9
 
 /** How many closed turns stay addressable. Older turns simply render no card. */
 const MAX_TURNS = 15
