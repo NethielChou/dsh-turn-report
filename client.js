@@ -46,6 +46,7 @@ window.__ModuleLoader__.load({
         llmDetailTotal: '合计：{n}',
         sbPlan: '当前计划',
         sbStale: '本轮未更新',
+        sbStaleFrom: '沿用第 {n} 轮清单',
         sbStaleHint: '本轮没有写任务清单，上面是仍在生效的最近一份计划',
         sbSeenAbove: '见上方',
         sbCleared: '本轮清空了任务清单',
@@ -83,6 +84,7 @@ window.__ModuleLoader__.load({
         llmDetailTotal: 'Total: {n}',
         sbPlan: 'Current plan',
         sbStale: 'not updated this turn',
+        sbStaleFrom: 'carried over from turn {n}',
         sbStaleHint: 'This turn wrote no task list; the newest plan still in force is shown.',
         sbSeenAbove: 'listed above',
         sbCleared: 'the task list was cleared this turn',
@@ -691,8 +693,15 @@ window.__ModuleLoader__.load({
       if (opts.showStatusBar !== false && plan !== null && plan.total > 0) {
         const finishedKeys = new Set(finished.map(row => row.c))
         const sections = plan.groups.map((group) => {
+          // Only a FULLY completed section can be covered by the finished block.
+          // Testing coverage without the completeness condition suppressed a 0/1
+          // pending section too, because its single row's text happened to match a
+          // finished row from a DIFFERENT section with the same name. The section
+          // kept its heading but lost its rows and its expander, so pending work
+          // became invisible.
+          const fullyDone = group.total > 0 && group.done === group.total
           const covered = finishedBox !== null
-            && group.total > 0
+            && fullyDone
             && group.children.length === group.total
             && group.children.every(row => finishedKeys.has(row.c))
           return covered ? { ...group, suppressed: true } : group
@@ -862,8 +871,17 @@ window.__ModuleLoader__.load({
       parts.push(h('div', { key: 'groups', style: style.sbSection },
         h('div', { key: 'h', style: style.sbSectionTitle },
           '📋 ' + label('sbPlan'),
+          // "not updated this turn" alone leaves the reader guessing how old the plan
+          // is. Naming the turn it came from ("carried over from turn 2") is what
+          // makes the plan's age something they can judge.
           plan.stale === true
-            ? h('span', { key: 's', style: style.sbStale, title: label('sbStaleHint') }, label('sbStale'))
+            ? h('span', {
+              key: 's',
+              style: style.sbStale,
+              title: label('sbStaleHint'),
+            }, plan.sourceTurn === undefined || plan.sourceTurn === null
+              ? label('sbStale')
+              : fmt(label('sbStaleFrom'), { n: plan.sourceTurn }))
             : null),
         sections))
       if (plan.more > 0) parts.push(h('div', { key: 'more', style: style.more }, '… ' + fmt(label('more'), { n: plan.more })))

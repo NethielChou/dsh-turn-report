@@ -63,8 +63,12 @@ const KEY = 'turnReport'
  *
  * v11: each turn may carry `decisions` — human messages quoted verbatim when they
  * read as a decision. New field, so the checkpoint changes again.
+ *
+ * v12: `plan.sourceTurn` names the turn whose list is shown when the current turn
+ * carried it forward, so the card can say "carried over from turn 2" instead of a
+ * bare "not updated this turn".
  */
-const STATE_VERSION = 11
+const STATE_VERSION = 12
 
 /** How many closed turns stay addressable. Older turns simply render no card. */
 const MAX_TURNS = 15
@@ -282,14 +286,24 @@ function humanTextOf(event) {
  * The review that prompted this feature put it plainly: a false "they split the
  * stage" changes what the reader believes happened, while a missed one only shows
  * less. So exclusion runs before inclusion, and the net is deliberately tight.
+ *
+ * The first revision of this list went by substring cues ("方案", "决定") and
+ * therefore quoted "我还没决定用哪个方案。" and "请对比这两个方案的区别。" — sentences
+ * about the ABSENCE of a decision. That is the exact failure the review warned about,
+ * so the check now covers unanswered states and comparison requests explicitly, and
+ * a bare question is rejected regardless of punctuation.
  */
 const NON_DECISION_MARKERS = [
-  // Hypotheticals and questions.
+  // Still undecided.
+  '还没决定', '还没定', '没决定', '未决定', '决定不了', '不确定', '待定', '再想想',
+  // Asking for comparison or information rather than stating an outcome.
+  '对比', '区别', '哪个好', '推荐', '怎么看', '为什么', '怎么回事', '什么情况',
+  // Hypotheticals.
   '要不要', '是否要', '如果', '假如', '假设', '可以考虑', '也许', '或许', '是不是要',
-  // A question mark at the end turns the sentence into a question, never a decision.
-  '吗？', '吗?', '呢？', '呢?', '？', '?',
-  // "我感觉是不是…" is an observation, not a decision.
-  '我感觉', '是不是', '会不会', '能不能帮', '可不可以',
+  // Questions, with or without a question mark.
+  '吗', '呢', '是不是', '会不会', '可不可以', '能不能帮', '我感觉',
+  // A question mark anywhere turns the message into a question.
+  '？', '?',
   // Negations of the action itself.
   '先别', '不要', '别急', '不用', '暂不', '不拆', '不合并', '先不做',
   // Reported speech / quoting.
@@ -297,25 +311,52 @@ const NON_DECISION_MARKERS = [
 ]
 
 /**
- * Phrases that mark a sentence as a CHOICE rather than a decision the reader needs
- * structured.
+ * Patterns that state an outcome. A message must match one to be quoted.
  *
- * Measured against this project's own 50 human messages: a regex that tries to pull
- * "action + object" out of natural language fired twice and got one of them wrong
- * ("C 方向要做" → object "方向"). Natural, conversational Chinese does not decompose
- * into verb/object cleanly enough for extraction to beat plain quotation, and the
- * review was explicit that a wrong "they decided X" is worse than showing less.
- *
- * So this list does not extract a structure — it only decides WHETHER a message is
- * worth quoting verbatim on the card.
+ * This replaced a "contains a cue word" test, which was too loose: it fired on
+ * sentences that merely MENTION a decision. Requiring a selecting or acting verb
+ * with something after it is what keeps the card to real outcomes.
  */
-const DECISION_CUES = [
-  '改成', '改为', '换成', '就用', '选', '方案',
-  '要做', '就做', '先做', '开始做', '继续做',
-  '先建', '先发', '先做', '先写', '先改',
-  '拆分', '拆成', '合并', '去掉', '删掉', '移除', '放弃', '停止',
-  '你不要', '我要你', '我是说', '应该是', '可以试', '决定',
+const DECISION_SHAPES = [
+  // First-person selection: 我选方案 E / 我用 B / 我决定改成 X
+  /(?:我|就|还是)\s*(?:选|用|决定|采用|要)\s*(?:方案|选项)?\s*[\w\u4e00-\u9fa5@./-]{1,30}/,
+  // Imperative selection or change: 改成 X / 就按 A 做 / 用 B
+  /(?:改成|改为|换成|就按|按)\s*[\w\u4e00-\u9fa5@./-]{1,30}/,
+  // Acting decisions: 先建私有仓 / 要做 C / 继续做 X / 发 npm
+  /(?:先|就|直接|马上)\s*(?:建|发|做|写|改|加|删|放|上|跑|装)\s*[\w\u4e00-\u9fa5]{1,30}/,
+  // Structural changes to the plan.
+  /(?:拆分|拆成|合并|去掉|删掉|移除|放弃|停止|开始做|要做)\s*[\w\u4e00-\u9fa5]{1,30}/,
 ]
+
+/**
+ * Whole-message forms that are a decision despite being short.
+ *
+ * These match the ENTIRE trimmed message, so they cannot fire on a fragment of a
+ * longer sentence. Covers the answers this project actually received: a bare option
+ * letter, an option plus its wording, and a one-word go-ahead.
+ *
+ * "继续" is deliberately absent: it means "keep going", not "decided X". Quoting it
+ * would put a meaningless row on the card every time the reader says it, and the
+ * card is trying to report changes, not activity.
+ *
+ * "要做吗" is deliberately absent from the option forms: it is a question, and the
+ * review caught the earlier version accepting it.
+ */
+const SHORT_DECISION = [
+  /^(?:就)?(?:做吧|开始吧|开干|同意|批准)$/,
+  /^(?:选|用)?\s*(?:方案|选项)\s*[A-Za-z0-9一二三四五六七八九十]{1,3}$/,
+  /^(?:选|用)?\s*[A-Za-z0-9一二三四五六七八九十]{1,3}\s*(?:方案)$/,
+]
+
+/**
+ * Marks a message as retracting the previous decision in the same turn.
+ *
+ * The review's case: "同一轮先说方案 A，再说先别做，刚才的决定撤回" kept the retracted
+ * choice. A retraction has to remove what it retracts, so it is matched first and
+ * clears the turn's decisions instead of adding to them.
+ */
+const RETRACTION = /(?:撤回|收回|取消|不算|当我没说|反悔|算了)/
+
 
 /**
  * Shortest and longest message worth quoting as a decision.
@@ -329,48 +370,42 @@ const DECISION_MIN_LENGTH = 8
 const DECISION_MAX_LENGTH = 120
 
 /**
- * Whole-message forms that are a decision despite being short.
- *
- * These match the ENTIRE trimmed message, so they cannot fire on a fragment of a
- * longer sentence. Covers the answers this project actually received: a bare option
- * letter, an option plus its wording, and a one-word go-ahead.
- *
- * "继续" is deliberately absent: it means "keep going", not "decided X". Quoting it
- * would put a meaningless row on the card every time the reader says it, and the
- * card is trying to report changes, not activity.
- */
-const SHORT_DECISION = [
-  /^(?:就)?(?:做吧|开始吧|开干|同意|批准)$/,
-  /^(?:选|用)?\s*(?:方案|选项)?\s*[A-Za-z0-9一二三四五六七八九十]{1,3}\s*(?:方向|方案)?(?:要做)?$/,
-  /^[A-Za-z0-9一二三四五六七八九十]{1,3}\s*(?:方向|方案)\s*(?:要做|要做吗|吧)?$/,
-]
-
-/**
  * A message a person wrote that reads as a decision, quoted rather than parsed.
  *
  * The card shows the person's own words, trimmed, prefixed by who said it. This is
  * honest: it cannot mislabel an action, because it never labels one. What it does
  * add beyond the task list is timing — the reader learns that on turn N the person
  * said this, even if the todo list has not caught up yet.
+ *
+ * Returning `{ retract: true }` means the message withdraws an earlier decision in
+ * the same turn; the caller clears instead of appending.
  * @param {string} text - one human message.
- * @returns {string | null} the quotable text, or null when it is not a decision.
+ * @returns {{ quote?: string, retract?: boolean } | null} the effect, or null.
  */
 function decisionOf(text) {
   const body = text.trim()
   if (body.length > DECISION_MAX_LENGTH) return null
-  // Exclusions first: a question or hypothesis is not a decision, even if it
-  // contains a cue word ("要不要改成 X" must not fire).
+  // A retraction must be recognised even though it contains exclusion markers
+  // ("撤回" implies stopping), so it is tested before the exclusion sweep.
+  if (RETRACTION.test(body) && body.length <= 60) return { retract: true }
   for (const marker of NON_DECISION_MARKERS) {
     if (body.includes(marker)) return null
   }
   // Whole-message forms are checked before the length floor, because the shortest
   // messages in this session were among the clearest decisions.
   for (const re of SHORT_DECISION) {
-    if (re.test(body)) return body
+    if (re.test(body)) return { quote: body }
+  }
+  // An imperative decision is a decision at any length: "先建私有仓" is five
+  // characters and unmistakably an instruction, so the general length floor must not
+  // be what decides whether it counts.
+  for (const re of DECISION_SHAPES) {
+    if (re.test(body) && /^(?:我|就|还是|先|直接|马上|把)/.test(body)) return { quote: body }
   }
   if (body.length < DECISION_MIN_LENGTH) return null
-  for (const cue of DECISION_CUES) {
-    if (body.includes(cue)) return body
+  // Require an outcome shape: mentioning the word "方案" is not deciding anything.
+  for (const re of DECISION_SHAPES) {
+    if (re.test(body)) return { quote: body }
   }
   return null
 }
@@ -562,13 +597,13 @@ function livePlan(state, maxRows) {
  * @param {boolean} wroteEmpty - the turn explicitly wrote an empty list.
  * @returns {object | null} the plan payload, or null when there is nothing to show.
  */
-function planFor(todos, prevTodos, maxRows, wroteEmpty) {
+function planFor(todos, prevTodos, maxRows, wroteEmpty, sourceTurn) {
   if (wroteEmpty) return null
   if (Array.isArray(todos) && todos.length > 0) {
-    return { ...planSnapshot(todos, maxRows), stale: false }
+    return { ...planSnapshot(todos, maxRows), stale: false, sourceTurn }
   }
   if (Array.isArray(prevTodos) && prevTodos.length > 0) {
-    return { ...planSnapshot(prevTodos, maxRows), stale: true }
+    return { ...planSnapshot(prevTodos, maxRows), stale: true, sourceTurn }
   }
   return null
 }
@@ -583,7 +618,7 @@ function planFor(todos, prevTodos, maxRows, wroteEmpty) {
  * @param {string | undefined} cwd - the session workspace root, for shorter file labels.
  * @returns {object} the frozen entry.
  */
-function freezeTurn(turn, endKind, todos, prevTodos, maxRows, cwd, wroteEmpty) {
+function freezeTurn(turn, endKind, todos, prevTodos, maxRows, cwd, wroteEmpty, sourceTurn) {
   const entry = {
     n: turn.n,
     end: endKind,
@@ -609,7 +644,7 @@ function freezeTurn(turn, endKind, todos, prevTodos, maxRows, cwd, wroteEmpty) {
     // as frozen. Carrying the newest known list forward and labelling it is the
     // honest middle: the reader sees the plan that was actually in force, and the
     // badge says the turn itself did not update it.
-    plan: planFor(todos, prevTodos, maxRows, wroteEmpty === true),
+    plan: planFor(todos, prevTodos, maxRows, wroteEmpty === true, sourceTurn),
     // A deliberately cleared plan is a real event worth reporting, not an absent
     // one. Without this flag a cleared turn is indistinguishable from a turn that
     // did nothing, so the reader cannot tell "they dropped the plan" from "we have
@@ -835,7 +870,7 @@ export async function apply(ctx, config) {
   const maxRows = resolved.maxRows
 
   /** Empty fold state: no open turn, no todo list seen yet, no closed turn. */
-  const initState = () => ({ turns: {}, order: [], cur: null, todos: null, prevTodos: null, cwd: undefined })
+  const initState = () => ({ turns: {}, order: [], cur: null, todos: null, prevTodos: null, todosTurn: null, cwd: undefined })
 
   // One unit definition serves every session, so the view cache is keyed by the
   // immutable state object itself rather than by a single slot: `apply` replaces
@@ -907,8 +942,13 @@ export async function apply(ctx, config) {
           if (text === null) return state
           const decision = decisionOf(text)
           if (decision === null) return state
-          if (cur.decisions.includes(decision)) return state
-          return { ...state, cur: { ...cur, decisions: [...cur.decisions, decision].slice(-MAX_DECISIONS) } }
+          // A retraction clears the turn's pending quotes instead of adding one:
+          // "方案 A" followed by "刚才的决定撤回" must leave nothing behind.
+          if (decision.retract === true) {
+            return cur.decisions.length === 0 ? state : { ...state, cur: { ...cur, decisions: [] } }
+          }
+          if (cur.decisions.includes(decision.quote)) return state
+          return { ...state, cur: { ...cur, decisions: [...cur.decisions, decision.quote].slice(-MAX_DECISIONS) } }
         }
         case 'assistant/message': {
           // One finished model response. This is the only event pairing a billed
@@ -934,6 +974,7 @@ export async function apply(ctx, config) {
           return {
             ...state,
             todos,
+            todosTurn: wroteEmpty ? state.todosTurn : (state.cur === null ? state.todosTurn : state.cur.n),
             cur: state.cur === null ? null : { ...state.cur, todosUpdated: true, wroteEmpty },
           }
         }
@@ -957,7 +998,7 @@ export async function apply(ctx, config) {
           const live = state.cur !== null && state.cur.n === n
             ? state.cur
             : { n, tools: 0, failed: 0, files: [], todosUpdated: false, wroteEmpty: false, decisions: [], calls: 0, usage: emptyUsage(), models: [] }
-          const entry = freezeTurn(live, endKind, state.todos, state.prevTodos, maxRows, state.cwd, live.wroteEmpty)
+          const entry = freezeTurn(live, endKind, state.todos, state.prevTodos, maxRows, state.cwd, live.wroteEmpty, state.todos === null ? state.todosTurn : n)
           const turns = { ...state.turns, [String(n)]: entry }
           let order = [...state.order.filter(value => value !== n), n]
           if (order.length > MAX_TURNS) {

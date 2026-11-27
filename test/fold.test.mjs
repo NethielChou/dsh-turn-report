@@ -623,11 +623,34 @@ console.log('decision extraction from human messages')
     ['turn/start', { turn: 1 }],
     human('做吧'),
     human('方案 E'),
-    human('C 方向要做'),
+    human('先建私有仓'),
     ['turn/end', { turn: 1, reason: { kind: 'completed' } }],
   ], cfg)
   check('decisions are capped', many.wire.turns['1'].decisions.length, 2)
-  check('and the newest two are kept', many.wire.turns['1'].decisions, ['方案 E', 'C 方向要做'])
+  check('and the newest two are kept', many.wire.turns['1'].decisions, ['方案 E', '先建私有仓'])
+
+  // The review's cases: sentences ABOUT the absence of a decision must not quote.
+  for (const [text, label] of [
+    ['我还没决定用哪个方案。', 'undecided'],
+    ['C 方向要做吗', 'question without a mark'],
+    ['请对比这两个方案的区别。', 'comparison request'],
+  ]) {
+    const r = await fold([
+      ['turn/start', { turn: 1 }],
+      human(text),
+      ['turn/end', { turn: 1, reason: { kind: 'completed' } }],
+    ], cfg)
+    check('not quoted: ' + label, r.wire.turns['1'].decisions, null)
+  }
+
+  // A retraction in the same turn withdraws the earlier choice.
+  const retracted = await fold([
+    ['turn/start', { turn: 1 }],
+    human('方案 A'),
+    human('先别做，刚才的决定撤回'),
+    ['turn/end', { turn: 1, reason: { kind: 'completed' } }],
+  ], cfg)
+  check('a retraction clears the earlier choice', retracted.wire.turns['1'].decisions, null)
 }
 
 console.log('no-op events keep the state reference')
