@@ -3,7 +3,7 @@
 > 交接对象：Codex（或其他外部技术顾问）
 > 项目：`dsh-turn-report` — DeepSeek Harness 的轮末项目汇报卡插件
 > 仓库：<https://github.com/NethielChou/dsh-turn-report>（私有）
-> 本地：`D:\Agent\Agent Workspace\DSH\projects\dev\dsh-turn-report`
+> 本地：仓库根目录
 > 写于：2026-11-27
 
 ## 一句话问题

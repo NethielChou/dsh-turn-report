@@ -1,6 +1,6 @@
 # DSH 插件上架规范与实操（本机实测整理）
 
-> 来源：`@nethiel/dsh-llm-keypool` 从 0.1.0 到 0.1.5 完整上架过程（2026-10 ~ 11），
+> 来源：一个已上架的 DSH 插件从 0.1.0 到 0.1.5 的完整上架过程（2026-10 ~ 11），
 > 加上 `dsh-community-plugins` 官方 README 的强制约定。
 > 原始记录：`DSH\reports\2026-10-25-发布对齐与缺口清单.md`（306 行，十三轮）。
 
@@ -56,7 +56,7 @@ pnpm add npm --dir tools\npm-cli
 
 # 2. 登录（必须在可见终端窗口）
 tools\npm-login-window.ps1   # npm login --auth-type=web
-npm whoami                    # nethiel
+npm whoami                    # 打印你的账号名
 
 # 3. 暂存发布（不是直接 publish）
 npm stage publish --registry=https://registry.npmjs.org
@@ -64,7 +64,7 @@ npm stage publish --registry=https://registry.npmjs.org
 
 要点：
 
-- **必须走代理** `127.0.0.1:7890`，直连会 `ECONNRESET`
+- **可能需要代理** —— 先试直连；只有超时才配 `http.proxy`，端口按你本机的代理软件填
 - agent 的重定向 stdin **无法完成 `npm login`**（卡在 `Username:`），必须开可见窗口
 - 登录链接**约 10 分钟过期**，过期报 `Invalid or Expired Token`
 - `npm stage publish` 后 registry 只显示占位 `0.0.0-stage`，**需用户到
@@ -156,12 +156,20 @@ utility:     cleanup / stats / notify / net
 - [ ] 截图是当前版本（市场详情页会被用户对照）
 - [ ] `LICENSE` 文件存在且与 `package.json` 的 `license` 一致
 
-## 八、本机环境事实
+## 八、本机环境（公开仓库里不写具体值）
 
-| 项 | 值 |
+这份文档随仓库公开，因此本机账号、代理端口与绝对路径不写在这里。
+
+自己发布时按实际情况核对：
+
+| 项 | 怎么查 |
 |---|---|
-| DSH 内核 | 0.2.2-rc.5（profiles: `desktop`） |
-| npm | 无全局 CLI；工作区 `tools\npm-cli` 装 npm 11.21.1 |
-| npm 账号 | `nethiel`，包名前缀 `@nethiel/` |
-| GitHub | `gh` 已登录 `NethielChou`，token 无 `workflow` scope |
-| 代理 | `127.0.0.1:7890`（npm 必须走） |
+| DSH 内核版本 | `dsh --version` |
+| npm CLI | 若 `npm` 不在 PATH，用包管理器把它装到工作区再调用 |
+| npm 账号 | `npm whoami`（首次需 `npm login`） |
+| GitHub 登录 | `gh auth status` |
+| 代理 | 若 registry 直连超时，再配 `http.proxy`；能直连就不要设 |
+
+**一个已经踩过的坑**：git 全局配置里残留指向已关闭代理的
+`http.https://github.com.proxy` 会让 `git push` 直接失败，报
+`Failed to connect to github.com:443 over proxy`。直连可用时把这行删掉。

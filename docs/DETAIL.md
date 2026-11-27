@@ -13,8 +13,76 @@ cost, no files written**.
 | 📋 Metrics | every turn | tool calls, failures (hidden when zero), files changed, end state |
 | ⚙️ Execution | when the turn had model responses | model route, **call count**, input/output tokens, cache hit rate |
 | 📄 Files | when the turn wrote files | workspace-relative paths, up to 6 |
+| 💬 Decided | when the person stated a decision | their own words, quoted verbatim |
 | 📝 Finished | when the turn ticked items off | only what this turn newly completed |
-| 🎮 Plan HUD | when the turn wrote a task list | progress bar + three foldable slots |
+| 🎮 Plan HUD | when the session has a task list | progress bar + foldable sections |
+
+### 💬 Why decisions are quoted, not parsed
+
+`todo_write` records tasks, not intent. A person saying "先建私有仓，明天再发 npm"
+leaves no trace in the task list until the next write — and sometimes not even then.
+Quoting their words is the only honest way to show that on turn N they decided this.
+
+It quotes rather than extracts because extraction was tried and failed: a regex
+pulling "action + object" out of natural Chinese fired twice in 50 real messages and
+got one wrong. Quoting cannot mislabel an action, because it never labels one.
+
+Guards, in order: injected context is filtered first (in a real session 92 of 145
+`user/message` events were system text, not a person), then questions, hypotheticals
+and negations, then short whole-message answers which were among the clearest
+decisions here ("做吧", "方案 E"). A retraction clears the turn's quotes.
+
+### 📋 Three different silences
+
+The card distinguishes them, because they mean different things:
+
+| Situation | The card shows |
+|---|---|
+| This turn wrote a list | that turn's plan, no badge |
+| This turn wrote nothing, but the session has a list | the newest plan in force, badged "carried over from turn N" |
+| This turn cleared the list | "the task list was cleared this turn" |
+| The session has **never** used a list | "no task list has been used in this session" |
+
+Without the last line, a session whose model never called `todo_write` showed a bare
+metrics table with no explanation, which reads as a broken plugin.
+
+## The plan HUD
+
+**Two grouping modes, chosen by the list's own content.**
+
+**Stages** — when items carry a 【label】 prefix, the three counts describe *phases*
+rather than individual tasks:
+
+```
+tasks 2/5   ✅ 2  ⏳ 1  ⬜ 2
+⏭ Next: build the skeleton
+📋 Current plan
+┌ ▶ ✅ 阶段一·调研  2/2 done      ← its own tasks are all complete
+┌ ▼ ⏳ 阶段二·实现  1/2 done
+│  ⏳ 搭插件骨架
+│  ⬜ 实现投影 fold
+┌ ▼ ⬜ 阶段三·发布  0/1 done
+```
+
+A stage's state comes from its own items: all done → ✅, any running → ⏳, else ⬜.
+Accepted prefixes: `【阶段一·调研】`, `〔P1〕`, `[阶段2]`.
+
+**Status** — with no stage markers the list is bucketed by task status instead.
+
+### Why stages must be marked, not inferred
+
+`todo_write` has no stage field, and measured payloads are 100% flat (0 of 5 items
+carried indentation). Stage cannot be derived from the data, so the person writing
+the list marks it. Any bracketed prefix counts — no vocabulary is imposed.
+
+## How it is kept honest
+
+- Nothing is written to disk; all state lives in the session projection.
+- Changing what the view produces **requires** bumping `stateVersion`, or a cached
+  checkpoint keeps serving the old shape. This was paid for three times.
+- The card reports what the data says, including "no list" — it never invents
+  progress. If the model stops updating its list mid-turn, the card shows the stale
+  counts, because that is the truth.
 
 ## The plan HUD
 
