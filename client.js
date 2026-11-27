@@ -49,6 +49,7 @@ window.__ModuleLoader__.load({
         sbStaleHint: '本轮没有写任务清单，上面是仍在生效的最近一份计划',
         sbSeenAbove: '见上方',
         sbCleared: '本轮清空了任务清单',
+        sbDecisions: '本轮决定',
         hudTaskProgress: '任务 {done}/{total}',
         hudGroupProgress: '已完成 {done}/{total}',
         sbAllDone: '全部完成',
@@ -85,6 +86,7 @@ window.__ModuleLoader__.load({
         sbStaleHint: 'This turn wrote no task list; the newest plan still in force is shown.',
         sbSeenAbove: 'listed above',
         sbCleared: 'the task list was cleared this turn',
+        sbDecisions: 'Decided this turn',
         hudTaskProgress: 'tasks {done}/{total}',
         hudGroupProgress: '{done}/{total} done',
         sbAllDone: 'All done',
@@ -351,6 +353,17 @@ window.__ModuleLoader__.load({
         fontSize: 12,
         color: 'var(--dsw-alias-label-secondary)',
         padding: '2px 0',
+      },
+      sbDecision: {
+        fontSize: 12,
+        lineHeight: 1.6,
+        color: 'var(--dsw-alias-label-primary)',
+        borderLeft: '2px solid var(--dsw-alias-border-l2)',
+        paddingLeft: 8,
+        margin: '2px 0',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
       },
       sbStale: {
         marginLeft: 6,
@@ -655,6 +668,19 @@ window.__ModuleLoader__.load({
       // on every all-done turn. Such a section is passed to the HUD as
       // `suppressed`, which renders its heading and count but not its rows.
       const plan = entry.plan ?? null
+      // Decisions the person stated this turn, quoted verbatim. This sits above the
+      // plan because it explains WHY the plan may differ from the previous turn —
+      // and it is the only block that survives a turn whose task list did not change.
+      if (opts.showStatusBar !== false && Array.isArray(entry.decisions) && entry.decisions.length > 0) {
+        blocks.push(h('div', { key: 'decisions', style: style.hud },
+          h('div', { key: 'h', style: style.sbSectionTitle }, '💬 ' + label('sbDecisions')),
+          entry.decisions.map((text, index) => h('div', {
+            key: String(index),
+            style: style.sbDecision,
+            'data-decision': '1',
+            title: text,
+          }, '“' + text + '”'))))
+      }
       // A cleared plan is news: say so, rather than falling silent. Silence here is
       // indistinguishable from "no plan ever existed", which is a different fact.
       if (opts.showStatusBar !== false && plan === null && entry.cleared === true) {

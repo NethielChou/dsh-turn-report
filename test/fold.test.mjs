@@ -563,6 +563,73 @@ console.log('finished-delta identity: relabelled and duplicate items')
   check('both duplicates counted as new', dupBoth.wire.turns['2'].todo.finished.length, 2)
 }
 
+console.log('decision extraction from human messages')
+{
+  const cfg = { maxRows: 6, showWithoutTasks: true, showTree: true, showFiles: true, showFinished: true, showLlm: true, showStatusBar: true, todoView: 'auto' }
+  const human = text => ['user/message', { content: [{ type: 'text', text }], role: 'user' }]
+  // Injected context arrives as user/message too. Measured on a real session: 92 of
+  // 145 user events were injected, so this filter does most of the work.
+  const injected = text => ['user/message', { content: [{ type: 'text', text }], role: 'user' }]
+
+  const quoted = await fold([
+    ['turn/start', { turn: 1 }],
+    human('你先建私有仓，明天我们再发 npm 和转公有'),
+    ['turn/end', { turn: 1, reason: { kind: 'completed' } }],
+  ], cfg)
+  check('a stated decision is quoted', quoted.wire.turns['1'].decisions.length, 1)
+  check('quoted verbatim', quoted.wire.turns['1'].decisions[0].includes('你先建私有仓'), true)
+
+  // Injection must not be mistaken for a person speaking.
+  const noise = await fold([
+    ['turn/start', { turn: 1 }],
+    injected('<system-reminder>\nThe following workspace instructions may be relevant'),
+    injected('Time sampled while preparing turn 1, step 1: 2026-11-01T00:00:00+08:00'),
+    ['turn/end', { turn: 1, reason: { kind: 'completed' } }],
+  ], cfg)
+  check('injected context is not a decision', noise.wire.turns['1'].decisions, null)
+
+  // A question is not a decision, even with a decision-shaped cue inside.
+  const question = await fold([
+    ['turn/start', { turn: 1 }],
+    human('要不要把打包拆成签名和出包？'),
+    ['turn/end', { turn: 1, reason: { kind: 'completed' } }],
+  ], cfg)
+  check('a question is not quoted', question.wire.turns['1'].decisions, null)
+
+  const speculation = await fold([
+    ['turn/start', { turn: 1 }],
+    human('如果验收失败就先别合并'),
+    ['turn/end', { turn: 1, reason: { kind: 'completed' } }],
+  ], cfg)
+  check('a hypothetical is not quoted', speculation.wire.turns['1'].decisions, null)
+
+  // Short whole-message answers ARE decisions and were the clearest ones here.
+  const short = await fold([
+    ['turn/start', { turn: 1 }],
+    human('做吧'),
+    ['turn/end', { turn: 1, reason: { kind: 'completed' } }],
+  ], cfg)
+  check('a one-word go-ahead is quoted', short.wire.turns['1'].decisions, ['做吧'])
+
+  const option = await fold([
+    ['turn/start', { turn: 1 }],
+    human('方案 E'),
+    ['turn/end', { turn: 1, reason: { kind: 'completed' } }],
+  ], cfg)
+  check('a bare option pick is quoted', option.wire.turns['1'].decisions, ['方案 E'])
+
+  // Per-turn cap: two is already a busy turn.
+  const many = await fold([
+    ['turn/start', { turn: 1 }],
+    human('做吧'),
+    human('方案 E'),
+    human('C 方向要做'),
+    ['turn/end', { turn: 1, reason: { kind: 'completed' } }],
+  ], cfg)
+  check('decisions are capped', many.wire.turns['1'].decisions.length, 2)
+  check('and the newest two are kept', many.wire.turns['1'].decisions, ['方案 E', 'C 方向要做'])
+}
+
 console.log('no-op events keep the state reference')
 {
   const { ctx, captured } = fakeContext()

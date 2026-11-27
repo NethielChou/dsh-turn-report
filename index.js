@@ -60,8 +60,11 @@ const KEY = 'turnReport'
  * work), and duplicates are matched by count (previously a second completion was
  * invisible). All three change what wire.view produces, so the checkpoint must be
  * rebuilt.
+ *
+ * v11: each turn may carry `decisions` — human messages quoted verbatim when they
+ * read as a decision. New field, so the checkpoint changes again.
  */
-const STATE_VERSION = 10
+const STATE_VERSION = 11
 
 /** How many closed turns stay addressable. Older turns simply render no card. */
 const MAX_TURNS = 15
@@ -73,6 +76,8 @@ const MAX_FILES = 6
 /** Status bar budget: rows are scarce, so it shows a focused slice, not the list. */
 const MAX_GROUP_ITEMS = HARD_MAX_ROWS
 const LIVE_NEXT_UP = 3
+/** How many quoted decisions to keep per turn. Two is already a busy turn. */
+const MAX_DECISIONS = 2
 
 /** How the todo area chooses between the finished list and the project tree. */
 const TODO_VIEWS = ['auto', 'tree', 'both']
@@ -224,6 +229,150 @@ function addUsage(acc, usage) {
     && next.cacheRead === acc.cacheRead && next.cacheWrite === acc.cacheWrite
     && next.total === acc.total) return acc
   return next
+}
+
+/**
+ * System-generated user messages that are not a person talking.
+ *
+ * The session log stores injected context as `user/message` too: reminders, skill
+ * catalogues, memory banners, per-step timestamps, approval-policy notices. Measured
+ * on this project's own session: 92 of 145 user events were these, so filtering them
+ * is most of the work — a decision extractor that reads them would fire on template
+ * text rather than on anything a person decided.
+ */
+const INJECTED_PREFIXES = [
+  '<system-reminder>',
+  '<hindsight_pages>',
+  '<hindsight_page_refresh>',
+  'Time sampled while preparing turn',
+  'The user changed the approval policy',
+  'The following workspace instructions',
+  'A skill is a reusable',
+  'This is an automatically generated checkpoint',
+  '[model changed:',
+]
+
+/**
+ * Text of a `user/message` event, or null when it is not a person speaking.
+ * @param {object} event - the `user/message` event.
+ * @returns {string | null} the human text, trimmed; null for injected context.
+ */
+function humanTextOf(event) {
+  const content = event?.data?.content
+  let text = ''
+  if (typeof content === 'string') {
+    text = content
+  } else if (Array.isArray(content)) {
+    text = content
+      .filter(part => part?.type === 'text' && typeof part.text === 'string')
+      .map(part => part.text)
+      .join('\n')
+  }
+  const trimmed = text.trim()
+  if (trimmed === '') return null
+  for (const prefix of INJECTED_PREFIXES) {
+    if (trimmed.startsWith(prefix)) return null
+  }
+  return trimmed
+}
+
+/**
+ * Phrases that mean the sentence is NOT a decision, checked first.
+ *
+ * The review that prompted this feature put it plainly: a false "they split the
+ * stage" changes what the reader believes happened, while a missed one only shows
+ * less. So exclusion runs before inclusion, and the net is deliberately tight.
+ */
+const NON_DECISION_MARKERS = [
+  // Hypotheticals and questions.
+  '要不要', '是否要', '如果', '假如', '假设', '可以考虑', '也许', '或许', '是不是要',
+  // A question mark at the end turns the sentence into a question, never a decision.
+  '吗？', '吗?', '呢？', '呢?', '？', '?',
+  // "我感觉是不是…" is an observation, not a decision.
+  '我感觉', '是不是', '会不会', '能不能帮', '可不可以',
+  // Negations of the action itself.
+  '先别', '不要', '别急', '不用', '暂不', '不拆', '不合并', '先不做',
+  // Reported speech / quoting.
+  '你说要', '你说的', '有人建议', '文档里说', 'README 里',
+]
+
+/**
+ * Phrases that mark a sentence as a CHOICE rather than a decision the reader needs
+ * structured.
+ *
+ * Measured against this project's own 50 human messages: a regex that tries to pull
+ * "action + object" out of natural language fired twice and got one of them wrong
+ * ("C 方向要做" → object "方向"). Natural, conversational Chinese does not decompose
+ * into verb/object cleanly enough for extraction to beat plain quotation, and the
+ * review was explicit that a wrong "they decided X" is worse than showing less.
+ *
+ * So this list does not extract a structure — it only decides WHETHER a message is
+ * worth quoting verbatim on the card.
+ */
+const DECISION_CUES = [
+  '改成', '改为', '换成', '就用', '选', '方案',
+  '要做', '就做', '先做', '开始做', '继续做',
+  '先建', '先发', '先做', '先写', '先改',
+  '拆分', '拆成', '合并', '去掉', '删掉', '移除', '放弃', '停止',
+  '你不要', '我要你', '我是说', '应该是', '可以试', '决定',
+]
+
+/**
+ * Shortest and longest message worth quoting as a decision.
+ *
+ * Too long is pasted material or a system prompt. Too short normally carries no
+ * subject ("继续", "A"), but a few very short messages ARE complete decisions and
+ * were the clearest ones in this session: "做吧", "方案 E", "C 方向要做". Those are
+ * admitted by `SHORT_DECISION` below instead of by lowering the general floor.
+ */
+const DECISION_MIN_LENGTH = 8
+const DECISION_MAX_LENGTH = 120
+
+/**
+ * Whole-message forms that are a decision despite being short.
+ *
+ * These match the ENTIRE trimmed message, so they cannot fire on a fragment of a
+ * longer sentence. Covers the answers this project actually received: a bare option
+ * letter, an option plus its wording, and a one-word go-ahead.
+ *
+ * "继续" is deliberately absent: it means "keep going", not "decided X". Quoting it
+ * would put a meaningless row on the card every time the reader says it, and the
+ * card is trying to report changes, not activity.
+ */
+const SHORT_DECISION = [
+  /^(?:就)?(?:做吧|开始吧|开干|同意|批准)$/,
+  /^(?:选|用)?\s*(?:方案|选项)?\s*[A-Za-z0-9一二三四五六七八九十]{1,3}\s*(?:方向|方案)?(?:要做)?$/,
+  /^[A-Za-z0-9一二三四五六七八九十]{1,3}\s*(?:方向|方案)\s*(?:要做|要做吗|吧)?$/,
+]
+
+/**
+ * A message a person wrote that reads as a decision, quoted rather than parsed.
+ *
+ * The card shows the person's own words, trimmed, prefixed by who said it. This is
+ * honest: it cannot mislabel an action, because it never labels one. What it does
+ * add beyond the task list is timing — the reader learns that on turn N the person
+ * said this, even if the todo list has not caught up yet.
+ * @param {string} text - one human message.
+ * @returns {string | null} the quotable text, or null when it is not a decision.
+ */
+function decisionOf(text) {
+  const body = text.trim()
+  if (body.length > DECISION_MAX_LENGTH) return null
+  // Exclusions first: a question or hypothesis is not a decision, even if it
+  // contains a cue word ("要不要改成 X" must not fire).
+  for (const marker of NON_DECISION_MARKERS) {
+    if (body.includes(marker)) return null
+  }
+  // Whole-message forms are checked before the length floor, because the shortest
+  // messages in this session were among the clearest decisions.
+  for (const re of SHORT_DECISION) {
+    if (re.test(body)) return body
+  }
+  if (body.length < DECISION_MIN_LENGTH) return null
+  for (const cue of DECISION_CUES) {
+    if (body.includes(cue)) return body
+  }
+  return null
 }
 
 /**
@@ -447,6 +596,10 @@ function freezeTurn(turn, endKind, todos, prevTodos, maxRows, cwd, wroteEmpty) {
     llm: (turn.calls ?? 0) > 0
       ? { calls: turn.calls, models: turn.models ?? [], usage: turn.usage ?? emptyUsage() }
       : null,
+    // Decisions the person stated in their own words during this turn, quoted
+    // verbatim. This is the only place the card can show a decision the task list
+    // has no row for yet.
+    decisions: Array.isArray(turn.decisions) && turn.decisions.length > 0 ? turn.decisions : null,
     // The plan state this card reports: the turn's own list when it wrote one,
     // otherwise the most recent list that was still in force, marked `stale`.
     //
@@ -735,11 +888,27 @@ export async function apply(ctx, config) {
               files: [],
               todosUpdated: false,
               wroteEmpty: false,
+              decisions: [],
               calls: 0,
               usage: emptyUsage(),
               models: [],
             },
           }
+        }
+        case 'user/message': {
+          // The only event that can carry a human decision. `todo_write` records
+          // tasks, not intent, so a person saying "先建私有仓，明天再发 npm" leaves
+          // no trace in the task list until the next write — and often not even then.
+          // Quoting them here is what lets the card show a decision the plan has not
+          // caught up with yet.
+          const cur = state.cur
+          if (cur === null) return state
+          const text = humanTextOf(event)
+          if (text === null) return state
+          const decision = decisionOf(text)
+          if (decision === null) return state
+          if (cur.decisions.includes(decision)) return state
+          return { ...state, cur: { ...cur, decisions: [...cur.decisions, decision].slice(-MAX_DECISIONS) } }
         }
         case 'assistant/message': {
           // One finished model response. This is the only event pairing a billed
@@ -787,7 +956,7 @@ export async function apply(ctx, config) {
           const endKind = event.data?.reason?.kind ?? 'completed'
           const live = state.cur !== null && state.cur.n === n
             ? state.cur
-            : { n, tools: 0, failed: 0, files: [], todosUpdated: false, wroteEmpty: false, calls: 0, usage: emptyUsage(), models: [] }
+            : { n, tools: 0, failed: 0, files: [], todosUpdated: false, wroteEmpty: false, decisions: [], calls: 0, usage: emptyUsage(), models: [] }
           const entry = freezeTurn(live, endKind, state.todos, state.prevTodos, maxRows, state.cwd, live.wroteEmpty)
           const turns = { ...state.turns, [String(n)]: entry }
           let order = [...state.order.filter(value => value !== n), n]
