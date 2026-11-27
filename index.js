@@ -64,11 +64,14 @@ const KEY = 'turnReport'
  * v11: each turn may carry `decisions` — human messages quoted verbatim when they
  * read as a decision. New field, so the checkpoint changes again.
  *
+ * v13: each turn records `sessionHasPlan` so a session that never used a task list
+ * can say so instead of rendering an unexplained empty card.
+ *
  * v12: `plan.sourceTurn` names the turn whose list is shown when the current turn
  * carried it forward, so the card can say "carried over from turn 2" instead of a
  * bare "not updated this turn".
  */
-const STATE_VERSION = 12
+const STATE_VERSION = 13
 
 /** How many closed turns stay addressable. Older turns simply render no card. */
 const MAX_TURNS = 15
@@ -618,7 +621,7 @@ function planFor(todos, prevTodos, maxRows, wroteEmpty, sourceTurn) {
  * @param {string | undefined} cwd - the session workspace root, for shorter file labels.
  * @returns {object} the frozen entry.
  */
-function freezeTurn(turn, endKind, todos, prevTodos, maxRows, cwd, wroteEmpty, sourceTurn) {
+function freezeTurn(turn, endKind, todos, prevTodos, maxRows, cwd, wroteEmpty, sourceTurn, sessionHasPlan) {
   const entry = {
     n: turn.n,
     end: endKind,
@@ -635,6 +638,10 @@ function freezeTurn(turn, endKind, todos, prevTodos, maxRows, cwd, wroteEmpty, s
     // verbatim. This is the only place the card can show a decision the task list
     // has no row for yet.
     decisions: Array.isArray(turn.decisions) && turn.decisions.length > 0 ? turn.decisions : null,
+    // Whether this session ever wrote a task list at all. When it never has, an
+    // empty plan block is not a bug the reader should puzzle over, so the card can
+    // say so instead of staying silent.
+    sessionHasPlan: sessionHasPlan === true,
     // The plan state this card reports: the turn's own list when it wrote one,
     // otherwise the most recent list that was still in force, marked `stale`.
     //
@@ -998,7 +1005,7 @@ export async function apply(ctx, config) {
           const live = state.cur !== null && state.cur.n === n
             ? state.cur
             : { n, tools: 0, failed: 0, files: [], todosUpdated: false, wroteEmpty: false, decisions: [], calls: 0, usage: emptyUsage(), models: [] }
-          const entry = freezeTurn(live, endKind, state.todos, state.prevTodos, maxRows, state.cwd, live.wroteEmpty, state.todos === null ? state.todosTurn : n)
+          const entry = freezeTurn(live, endKind, state.todos, state.prevTodos, maxRows, state.cwd, live.wroteEmpty, state.todos === null ? state.todosTurn : n, state.todosTurn !== null)
           const turns = { ...state.turns, [String(n)]: entry }
           let order = [...state.order.filter(value => value !== n), n]
           if (order.length > MAX_TURNS) {

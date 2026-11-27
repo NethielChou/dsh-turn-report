@@ -51,6 +51,7 @@ window.__ModuleLoader__.load({
         sbSeenAbove: '见上方',
         sbCleared: '本轮清空了任务清单',
         sbDecisions: '本轮决定',
+        emptySession: '本会话未使用任务清单（模型未调用 todo_write）',
         hudTaskProgress: '任务 {done}/{total}',
         hudGroupProgress: '已完成 {done}/{total}',
         sbAllDone: '全部完成',
@@ -89,6 +90,7 @@ window.__ModuleLoader__.load({
         sbSeenAbove: 'listed above',
         sbCleared: 'the task list was cleared this turn',
         sbDecisions: 'Decided this turn',
+        emptySession: 'No task list has been used in this session (the model never called todo_write)',
         hudTaskProgress: 'tasks {done}/{total}',
         hudGroupProgress: '{done}/{total} done',
         sbAllDone: 'All done',
@@ -423,6 +425,14 @@ window.__ModuleLoader__.load({
         fontSize: 11,
       },
       more: { marginTop: 4, fontSize: 11, color: 'var(--dsw-alias-label-tertiary)' },
+      // Explains an otherwise-empty card. Dimmer than body text but not as faint as
+      // the overflow counter, because it is the only thing the card is saying.
+      emptyNote: {
+        marginTop: 2,
+        fontSize: 12,
+        lineHeight: 1.6,
+        color: 'var(--dsw-alias-label-secondary)',
+      },
     }
 
     /**
@@ -728,8 +738,22 @@ window.__ModuleLoader__.load({
         blocks.push(h('div', { key: 'tree' }, tree))
       }
 
-      if (todo === null && blocks.length === 1) {
-        blocks.push(h('div', { key: 'empty', style: style.more }, label('empty')))
+      // Two different silences, and the reader needs to tell them apart:
+      //   - this turn wrote no list, but the session has used one → nothing to add
+      //   - the session has NEVER used a list → say so, or the empty card reads as
+      //     "the plugin is broken" rather than "this conversation never planned"
+      //
+      // The test is "no plan block was rendered", not "the card has only one block":
+      // a card that also lists touched files has two blocks and would otherwise stay
+      // silent about why the plan area is missing.
+      const renderedPlan = blocks.some(block => block?.props?.['data-plan'] !== undefined
+        || block?.props?.['data-stale'] !== undefined)
+      if (todo === null && plan === null && !renderedPlan) {
+        blocks.push(h('div', {
+          key: 'empty',
+          style: style.emptyNote,
+          'data-no-plan': entry.sessionHasPlan === true ? 'turn' : 'session',
+        }, entry.sessionHasPlan === true ? label('empty') : label('emptySession')))
       }
 
       return h('section', {

@@ -653,6 +653,30 @@ console.log('decision extraction from human messages')
   check('a retraction clears the earlier choice', retracted.wire.turns['1'].decisions, null)
 }
 
+console.log('sessionHasPlan distinguishes the two silences')
+{
+  const cfg = { maxRows: 6, showWithoutTasks: true, showTree: true, showFiles: true, showFinished: true, showLlm: true, showStatusBar: true, todoView: 'auto' }
+  // A session that never used a task list would otherwise show a bare metrics card
+  // with no explanation, which reads as "the plugin is broken".
+  const never = await fold([
+    ['turn/start', { turn: 1 }],
+    ['turn/end', { turn: 1, reason: { kind: 'completed' } }],
+  ], cfg)
+  check('a session with no list reports sessionHasPlan=false', never.wire.turns['1'].sessionHasPlan, false)
+
+  // The same turn shape, but the session HAS used a list earlier → the card knows a
+  // list exists and stays quiet rather than claiming the session never planned.
+  const usedEarlier = await fold([
+    ['turn/start', { turn: 1 }],
+    ['todo/write', { todos: [{ content: '任务甲', status: 'pending' }] }],
+    ['turn/end', { turn: 1, reason: { kind: 'completed' } }],
+    ['turn/start', { turn: 2 }],
+    ['turn/end', { turn: 2, reason: { kind: 'completed' } }],
+  ], cfg)
+  check('a session that used a list reports sessionHasPlan=true', usedEarlier.wire.turns['2'].sessionHasPlan, true)
+  check('and its plan is the carried one', usedEarlier.wire.turns['2'].plan.total, 1)
+}
+
 console.log('no-op events keep the state reference')
 {
   const { ctx, captured } = fakeContext()
