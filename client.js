@@ -48,6 +48,9 @@ window.__ModuleLoader__.load({
         sbStale: '本轮未更新',
         sbStaleHint: '本轮没有写任务清单，上面是仍在生效的最近一份计划',
         sbSeenAbove: '见上方',
+        sbCleared: '本轮清空了任务清单',
+        hudTaskProgress: '任务 {done}/{total}',
+        hudGroupProgress: '已完成 {done}/{total}',
         sbAllDone: '全部完成',
         sbNext: '下一项',
         sbExpand: '展开状态栏',
@@ -81,6 +84,9 @@ window.__ModuleLoader__.load({
         sbStale: 'not updated this turn',
         sbStaleHint: 'This turn wrote no task list; the newest plan still in force is shown.',
         sbSeenAbove: 'listed above',
+        sbCleared: 'the task list was cleared this turn',
+        hudTaskProgress: 'tasks {done}/{total}',
+        hudGroupProgress: '{done}/{total} done',
         sbAllDone: 'All done',
         sbNext: 'Next',
         sbExpand: 'Expand status bar',
@@ -340,6 +346,11 @@ window.__ModuleLoader__.load({
         marginLeft: 'auto',
         fontSize: 10,
         color: 'var(--dsw-alias-label-tertiary)',
+      },
+      sbCleared: {
+        fontSize: 12,
+        color: 'var(--dsw-alias-label-secondary)',
+        padding: '2px 0',
       },
       sbStale: {
         marginLeft: 6,
@@ -644,6 +655,13 @@ window.__ModuleLoader__.load({
       // on every all-done turn. Such a section is passed to the HUD as
       // `suppressed`, which renders its heading and count but not its rows.
       const plan = entry.plan ?? null
+      // A cleared plan is news: say so, rather than falling silent. Silence here is
+      // indistinguishable from "no plan ever existed", which is a different fact.
+      if (opts.showStatusBar !== false && plan === null && entry.cleared === true) {
+        blocks.push(h('div', { key: 'cleared', style: style.hud },
+          h('div', { key: 'h', style: style.sbSectionTitle }, '📋 ' + label('sbPlan')),
+          h('div', { key: 'c', style: style.sbCleared }, '🗑 ' + label('sbCleared'))))
+      }
       if (opts.showStatusBar !== false && plan !== null && plan.total > 0) {
         const finishedKeys = new Set(finished.map(row => row.c))
         const sections = plan.groups.map((group) => {
@@ -726,7 +744,7 @@ window.__ModuleLoader__.load({
                 : 'var(--dsw-alias-state-business-primary, #3f6fd8)',
             },
           })),
-        h('span', { key: 'n', style: style.hudCount }, plan.done + '/' + plan.total),
+        h('span', { key: 'n', style: style.hudCount }, fmt(label('hudTaskProgress'), { done: plan.done, total: plan.total })),
         // The three counters are a fixed HUD readout: a game bar does not hide the
         // "0" slots, and a missing group read as "the plugin lost my todo". They are
         // always present; a zero is dimmed rather than dropped.
@@ -775,7 +793,7 @@ window.__ModuleLoader__.load({
           },
           h('span', { key: 'i' }, (STATUS[group.s] ?? STATUS.left).icon),
           h('span', { key: 't', style: style.sbGroupLabel }, group.t),
-          h('span', { key: 'n', style: style.sbGroupCount }, group.total),
+          h('span', { key: 'n', style: style.sbGroupCount }, fmt(label('hudGroupProgress'), { done: group.done, total: group.total })),
           h('span', { key: 'h', style: style.sbSeenAbove }, label('sbSeenAbove')))
         }
 
@@ -804,7 +822,7 @@ window.__ModuleLoader__.load({
           h('span', { key: 'c', style: style.sbChevron }, isOpen ? '▼' : '▶'),
           h('span', { key: 'i' }, (STATUS[group.s] ?? STATUS.left).icon),
           h('span', { key: 't', style: style.sbGroupLabel }, group.t),
-          h('span', { key: 'n', style: style.sbGroupCount }, group.total)),
+          h('span', { key: 'n', style: style.sbGroupCount }, fmt(label('hudGroupProgress'), { done: group.done, total: group.total }))),
           isOpen
             ? group.children.map((row, childIndex) => h('div', {
               key: String(childIndex),

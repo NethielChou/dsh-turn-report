@@ -53,8 +53,15 @@ const KEY = 'turnReport'
  * hazard as v8 and it was paid for again: the code changed, the version did not,
  * so a cached v8 checkpoint kept replaying the status-grouped shape and the UI
  * looked untouched across several restarts and green test runs.
+ *
+ * v10: `cleared` flag added, and the finished delta changed semantics. An explicit
+ * empty list now drops the plan (previously it kept carrying the old one), stage
+ * labels are excluded from the identity key (previously a relabel counted as new
+ * work), and duplicates are matched by count (previously a second completion was
+ * invisible). All three change what wire.view produces, so the checkpoint must be
+ * rebuilt.
  */
-const STATE_VERSION = 9
+const STATE_VERSION = 10
 
 /** How many closed turns stay addressable. Older turns simply render no card. */
 const MAX_TURNS = 15
@@ -261,38 +268,84 @@ function displayPath(file, cwd) {
  * @param {string} content - the raw todo line.
  * @returns {string} the comparison key.
  */
+/**
+ * Comparison key for one todo line — the TEXT only, with any 【stage】 prefix
+ * removed first.
+ *
+ * Two failure modes come from keeping the stage label in the key:
+ *
+ * 1. **False "finished".** Moving a completed item from 【实现】 to 【验证】 keeps
+ *    the task but changes the label. With the label in the key the move reads as a
+ *    brand-new completion, so the card claims work that did not happen.
+ * 2. **Missed "finished".** Matching by text alone collapses duplicates: two items
+ *    literally named 文案 both hash to the same key, so finishing the second one is
+ *    invisible once the first is in the "already done" set.
+ *
+ * Labels are stripped here because the stage is presentation, not identity; the
+ * duplicate case is handled downstream by counting, not by keying.
+ * @param {string} content - the raw todo line.
+ * @returns {string} the comparison key.
+ */
 function matchKey(content) {
   return String(content)
     .replace(/^[\s\u3000]+/, '')
     .replace(/^(?:[-*•·]|\d+[.)]|#+)\s*/, '')
+    .replace(/^[【\[〔][^】\]〕]*[】\]〕]\s*/, '')
     .replace(/[\s\u3000]+/g, '')
     .toLowerCase()
 }
 
 /**
- * Which items this turn actually finished: now `completed`, and not already
- * `completed` in the previous turn's list.
+ * Count how many items with each key are `completed`.
+ * @param {object[] | null} todos - a whole list.
+ * @returns {Map<string, number>} completed count per key.
+ */
+function completedCounts(todos) {
+  const counts = new Map()
+  if (!Array.isArray(todos)) return counts
+  for (const item of todos) {
+    if (item?.status !== 'completed') continue
+    const key = matchKey(item?.content ?? '')
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  return counts
+}
+
+/**
+ * Which items this turn actually finished.
  *
- * This is the one todo fact the built-in input-dock panel cannot show — that
- * panel renders the live list, so it never says what changed.
+ * Matching is by text key and then by COUNT, not by set membership. Comparing sets
+ * loses duplicate items entirely: going from one completed 文案 to two completed
+ * 文案 leaves the set unchanged (`{文案}` before and after), so the second
+ * completion never reaches the card.
+ *
+ * The reported delta is therefore an increase in the per-key completed count. When
+ * a key became more complete than before, the rows shown are the ones with that key
+ * that are completed now, capped at the increase.
+ *
+ * This is the one todo fact the built-in input-dock panel cannot show — that panel
+ * renders the live list, so it never says what changed.
  * @param {object[]} todos - this turn's whole list.
  * @param {object[] | null} prevTodos - the previous turn's list, or null.
  * @param {number} maxRows - how many finished items to keep.
  * @returns {{ finished: object[], finishedMore: number }} the delta.
  */
 function finishedDuring(todos, prevTodos, maxRows) {
-  const alreadyDone = new Set()
-  if (Array.isArray(prevTodos)) {
-    for (const item of prevTodos) {
-      if (item?.status === 'completed') alreadyDone.add(matchKey(item?.content ?? ''))
-    }
-  }
+  const before = completedCounts(prevTodos)
   const finished = []
   let extra = 0
+  // Walk this turn's list in order so the card keeps the author's ordering.
+  const seen = new Map()
   for (const item of todos) {
     if (item?.status !== 'completed') continue
     const content = String(item?.content ?? '')
-    if (alreadyDone.has(matchKey(content))) continue
+    const key = matchKey(content)
+    const index = (seen.get(key) ?? 0) + 1
+    seen.set(key, index)
+    // Only the completions beyond what existed before are new; for a key that is
+    // newly repeated, each copy past the previous count counts as new.
+    const priorCount = before.get(key) ?? 0
+    if (index <= priorCount) continue
     if (finished.length < maxRows) finished.push({ c: rowTextOf(content), d: depthOf(content) })
     else extra += 1
   }
@@ -343,16 +396,25 @@ function livePlan(state, maxRows) {
 /**
  * The plan a closed turn should report.
  *
- * The turn's own list wins. When the turn wrote none, the newest list still in
- * force is carried forward with `stale: true`, so the card can show the plan and
- * say plainly that this turn did not update it. Showing nothing loses the context
- * entirely; showing an unlabelled repeat looks like a frozen UI.
+ * Three distinct inputs, which the naive implementation collapsed into two:
+ *
+ * | this turn | meaning | card |
+ * |---|---|---|
+ * | wrote a non-empty list | the plan changed | that list, no badge |
+ * | wrote an EMPTY list | the author cleared the plan | "plan cleared", no carry-over |
+ * | wrote nothing | no plan activity this turn | newest list still in force, marked stale |
+ *
+ * Treating "wrote empty" as "wrote nothing" made a deliberately cleared plan
+ * reappear on the card as if it were still live — flagged `stale`, which reads as
+ * "we could not update it" rather than "it was cleared".
  * @param {object[] | null} todos - the list this turn wrote, if any.
  * @param {object[] | null} prevTodos - the newest earlier list, if any.
  * @param {number} maxRows - section budget from config.
- * @returns {object | null} the plan payload, or null when no list is known yet.
+ * @param {boolean} wroteEmpty - the turn explicitly wrote an empty list.
+ * @returns {object | null} the plan payload, or null when there is nothing to show.
  */
-function planFor(todos, prevTodos, maxRows) {
+function planFor(todos, prevTodos, maxRows, wroteEmpty) {
+  if (wroteEmpty) return null
   if (Array.isArray(todos) && todos.length > 0) {
     return { ...planSnapshot(todos, maxRows), stale: false }
   }
@@ -372,7 +434,7 @@ function planFor(todos, prevTodos, maxRows) {
  * @param {string | undefined} cwd - the session workspace root, for shorter file labels.
  * @returns {object} the frozen entry.
  */
-function freezeTurn(turn, endKind, todos, prevTodos, maxRows, cwd) {
+function freezeTurn(turn, endKind, todos, prevTodos, maxRows, cwd, wroteEmpty) {
   const entry = {
     n: turn.n,
     end: endKind,
@@ -386,7 +448,7 @@ function freezeTurn(turn, endKind, todos, prevTodos, maxRows, cwd) {
       ? { calls: turn.calls, models: turn.models ?? [], usage: turn.usage ?? emptyUsage() }
       : null,
     // The plan state this card reports: the turn's own list when it wrote one,
-// otherwise the most recent list that was still in force, marked `stale`.
+    // otherwise the most recent list that was still in force, marked `stale`.
     //
     // Both extremes failed in practice. Rendering nothing for plan-less turns left
     // most cards with no HUD at all ("改完后怎么什么都没了"). Rendering the *live*
@@ -394,7 +456,12 @@ function freezeTurn(turn, endKind, todos, prevTodos, maxRows, cwd) {
     // as frozen. Carrying the newest known list forward and labelling it is the
     // honest middle: the reader sees the plan that was actually in force, and the
     // badge says the turn itself did not update it.
-    plan: planFor(todos, prevTodos, maxRows),
+    plan: planFor(todos, prevTodos, maxRows, wroteEmpty === true),
+    // A deliberately cleared plan is a real event worth reporting, not an absent
+    // one. Without this flag a cleared turn is indistinguishable from a turn that
+    // did nothing, so the reader cannot tell "they dropped the plan" from "we have
+    // no news".
+    cleared: wroteEmpty === true,
     todo: null,
   }
   if (Array.isArray(todos) && todos.length > 0) {
@@ -667,6 +734,7 @@ export async function apply(ctx, config) {
               failed: 0,
               files: [],
               todosUpdated: false,
+              wroteEmpty: false,
               calls: 0,
               usage: emptyUsage(),
               models: [],
@@ -690,10 +758,14 @@ export async function apply(ctx, config) {
         case 'todo/write': {
           const todos = Array.isArray(event.data?.todos) ? event.data.todos : null
           if (todos === null) return state
+          // `todosUpdated` alone cannot distinguish "wrote a list" from "wrote an
+          // empty list": both set it. `wroteEmpty` is what lets a cleared plan stop
+          // being carried forward instead of reappearing as a stale plan.
+          const wroteEmpty = todos.length === 0
           return {
             ...state,
             todos,
-            cur: state.cur === null ? null : { ...state.cur, todosUpdated: true },
+            cur: state.cur === null ? null : { ...state.cur, todosUpdated: true, wroteEmpty },
           }
         }
         case 'tool/call': {
@@ -715,8 +787,8 @@ export async function apply(ctx, config) {
           const endKind = event.data?.reason?.kind ?? 'completed'
           const live = state.cur !== null && state.cur.n === n
             ? state.cur
-            : { n, tools: 0, failed: 0, files: [], todosUpdated: false, calls: 0, usage: emptyUsage(), models: [] }
-          const entry = freezeTurn(live, endKind, state.todos, state.prevTodos, maxRows, state.cwd)
+            : { n, tools: 0, failed: 0, files: [], todosUpdated: false, wroteEmpty: false, calls: 0, usage: emptyUsage(), models: [] }
+          const entry = freezeTurn(live, endKind, state.todos, state.prevTodos, maxRows, state.cwd, live.wroteEmpty)
           const turns = { ...state.turns, [String(n)]: entry }
           let order = [...state.order.filter(value => value !== n), n]
           if (order.length > MAX_TURNS) {

@@ -490,6 +490,79 @@ console.log('stage grouping (【阶段】 prefixes)')
   check('flat list still uses status slots', flatOnly.wire.live.groups.map(x => x.k), ['done', 'doing', 'left'])
 }
 
+console.log('cleared vs absent plan (external review finding)')
+{
+  const cfg = { maxRows: 6, showWithoutTasks: true, showTree: true, showFiles: true, showFinished: true, showLlm: true, showStatusBar: true, todoView: 'auto' }
+  // Writing an explicit empty list means "the plan was cleared", which is different
+  // from "this turn wrote nothing". Treating them the same made a cleared plan keep
+  // reappearing as a stale plan.
+  const run = await fold([
+    ['turn/start', { turn: 1 }],
+    ['todo/write', { todos: [{ content: '任务A', status: 'in_progress' }, { content: '任务B', status: 'pending' }] }],
+    ['turn/end', { turn: 1, reason: { kind: 'completed' } }],
+    ['turn/start', { turn: 2 }],
+    ['todo/write', { todos: [] }],
+    ['turn/end', { turn: 2, reason: { kind: 'completed' } }],
+    ['turn/start', { turn: 3 }],
+    ['turn/end', { turn: 3, reason: { kind: 'completed' } }],
+  ], cfg)
+  check('clearing the list drops the plan (turn 2)', run.wire.turns['2'].plan, null)
+  check('and the card can say it was cleared', run.wire.turns['2'].cleared, true)
+  check('cleared plan does not revive later (turn 3)', run.wire.turns['3'].plan, null)
+
+  // A turn that wrote nothing still carries the last plan forward, marked stale.
+  const silent = await fold([
+    ['turn/start', { turn: 1 }],
+    ['todo/write', { todos: [{ content: '任务A', status: 'pending' }] }],
+    ['turn/end', { turn: 1, reason: { kind: 'completed' } }],
+    ['turn/start', { turn: 2 }],
+    ['turn/end', { turn: 2, reason: { kind: 'completed' } }],
+  ], cfg)
+  check('silent turn still carries the plan', silent.wire.turns['2'].plan.total, 1)
+  check('and marks it stale', silent.wire.turns['2'].plan.stale, true)
+  check('silent turn is not reported as cleared', silent.wire.turns['2'].cleared, false)
+}
+
+console.log('finished-delta identity: relabelled and duplicate items')
+{
+  const cfg = { maxRows: 20, showWithoutTasks: true, showTree: true, showFiles: true, showFinished: true, showLlm: true, showStatusBar: true, todoView: 'auto' }
+  // Moving a completed item to another stage must not read as new work: the stage
+  // label is presentation, not identity.
+  const relabel = await fold([
+    ['turn/start', { turn: 1 }],
+    ['todo/write', { todos: [{ content: '【实现】更新卡片', status: 'completed' }, { content: '【实现】其他', status: 'pending' }] }],
+    ['turn/end', { turn: 1, reason: { kind: 'completed' } }],
+    ['turn/start', { turn: 2 }],
+    ['todo/write', { todos: [{ content: '【验证】更新卡片', status: 'completed' }, { content: '【实现】其他', status: 'pending' }] }],
+    ['turn/end', { turn: 2, reason: { kind: 'completed' } }],
+  ], cfg)
+  check('relabelling between stages is not new work', relabel.wire.turns['2'].todo.finished, [])
+
+  // Two identically named items: finishing the second one IS a completion, even
+  // though the set of completed keys is unchanged.
+  const dup = await fold([
+    ['turn/start', { turn: 1 }],
+    ['todo/write', { todos: [{ content: '文案', status: 'completed' }, { content: '文案', status: 'pending' }] }],
+    ['turn/end', { turn: 1, reason: { kind: 'completed' } }],
+    ['turn/start', { turn: 2 }],
+    ['todo/write', { todos: [{ content: '文案', status: 'completed' }, { content: '文案', status: 'completed' }] }],
+    ['turn/end', { turn: 2, reason: { kind: 'completed' } }],
+  ], cfg)
+  check('duplicate item completion is counted', dup.wire.turns['2'].todo.finished.map(f => f.c), ['文案'])
+  check('total done reflects both', dup.wire.turns['2'].todo.done, 2)
+
+  // Finishing both duplicates at once reports both.
+  const dupBoth = await fold([
+    ['turn/start', { turn: 1 }],
+    ['todo/write', { todos: [{ content: '文案', status: 'pending' }, { content: '文案', status: 'pending' }] }],
+    ['turn/end', { turn: 1, reason: { kind: 'completed' } }],
+    ['turn/start', { turn: 2 }],
+    ['todo/write', { todos: [{ content: '文案', status: 'completed' }, { content: '文案', status: 'completed' }] }],
+    ['turn/end', { turn: 2, reason: { kind: 'completed' } }],
+  ], cfg)
+  check('both duplicates counted as new', dupBoth.wire.turns['2'].todo.finished.length, 2)
+}
+
 console.log('no-op events keep the state reference')
 {
   const { ctx, captured } = fakeContext()
